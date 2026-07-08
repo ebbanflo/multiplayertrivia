@@ -570,6 +570,11 @@ body {
   letter-spacing: 0.06em;
 }
 .shop-items { display: flex; flex-direction: column; gap: 0.5rem; }
+.btn-quit {
+  margin-top: auto;
+  background: var(--red); color: var(--cream);
+  align-self: stretch;
+}
 .powerup-btn {
   font-family: var(--font-body);
   display: flex; align-items: center; gap: 0.5em;
@@ -766,6 +771,12 @@ body {
   .pu-desc { display: none; }
   .pu-cost { margin-left: 0; }
   .pu-info { align-items: center; }
+  .btn-quit {
+    margin-top: 0; margin-left: 0.5rem;
+    align-self: center; flex-shrink: 0;
+    /* stay visible at the right edge while the power-up strip scrolls */
+    position: sticky; right: 0;
+  }
   .hud-name { max-width: 4.5em; }
   .timer-wrap { width: 34vw; }
   .setting-label { min-width: 0; width: 100%; }

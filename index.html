@@ -160,6 +160,7 @@
         <aside class="shop" id="shop">
           <h3 class="shop-title">POWER-UPS</h3>
           <div class="shop-items" id="shop-items"></div>
+          <button id="btn-quit-game" class="btn btn-small btn-quit">✕ QUIT</button>
         </aside>
       </div>
 
@@ -175,6 +176,7 @@
       <p class="lobby-status" id="intermission-status"></p>
       <div class="row-buttons">
         <button id="btn-next-round" class="btn btn-big btn-lime">NEXT ROUND →</button>
+        <button id="btn-quit-intermission" class="btn btn-purple">✕ QUIT</button>
       </div>
     </section>
 
@@ -200,7 +202,10 @@
     <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
     <dialog id="modal" class="modal">
       <p id="modal-text"></p>
-      <button id="modal-btn" class="btn btn-pink">OK</button>
+      <div class="row-buttons">
+        <button id="modal-btn" class="btn btn-pink">OK</button>
+        <button id="modal-cancel" class="btn btn-purple" hidden>CANCEL</button>
+      </div>
     </dialog>
 
     <button id="btn-mute" class="btn btn-small btn-yellow mute-btn" title="Toggle sound">🔊</button>

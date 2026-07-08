@@ -255,6 +255,39 @@ test.describe('HMMM? two-player battle', () => {
     await expect(guest.locator('#hud-round')).toHaveText(/R2\/2 · Q1\/10/);
   });
 
+  test('either player can quit to the menu mid-game', async ({ context }) => {
+    await stubApis(context);
+    const { host, guest } = await setupMatch(context, { timer: '30' });
+    await host.click('#btn-start');
+    await waitForAnswering(host, '1-0');
+    await waitForAnswering(guest, '1-0');
+
+    // Cancel keeps the battle going
+    await guest.click('#btn-quit-game');
+    await expect(guest.locator('#modal')).toBeVisible();
+    await guest.click('#modal-cancel');
+    expect((await engineState(guest)).phase).toBe('answering');
+
+    // Confirm quits: guest returns to the title, host is told
+    await guest.click('#btn-quit-game');
+    await guest.click('#modal-btn');
+    await expect(guest.locator('#screen-title')).toBeVisible({ timeout: 10_000 });
+    await expect(host.locator('#modal')).toBeVisible({ timeout: 10_000 });
+    await expect(host.locator('#modal-text')).toHaveText(/GUESTO left the game/i);
+    await host.click('#modal-btn');
+    await expect(host.locator('#screen-title')).toBeVisible({ timeout: 10_000 });
+
+    // And the other direction: host quits, guest is told
+    const m2 = await setupMatch(context, { timer: '30' });
+    await m2.host.click('#btn-start');
+    await waitForAnswering(m2.host, '1-0');
+    await m2.host.click('#btn-quit-game');
+    await m2.host.click('#modal-btn');
+    await expect(m2.host.locator('#screen-title')).toBeVisible({ timeout: 10_000 });
+    await expect(m2.guest.locator('#modal')).toBeVisible({ timeout: 10_000 });
+    await expect(m2.guest.locator('#modal-text')).toHaveText(/HOSTY left the game/i);
+  });
+
   test('joining a nonexistent room shows an error', async ({ context }) => {
     await stubApis(context);
     const page = await context.newPage();

@@ -7,7 +7,9 @@
 // see the opponent's cursor over the same part of the game. Touch
 // players emit on taps and drags.
 
-const SEND_INTERVAL_MS = 60; // ~16 msg/s — smooth after lerp, well under rate limits
+const SEND_INTERVAL_MS = 125; // ~8 msg/s — the receiver lerps between
+// updates so it still looks smooth, and it stretches the free-tier
+// realtime message quota about twice as far.
 
 export class CursorShare {
   constructor(sendFn) {

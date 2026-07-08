@@ -24,9 +24,27 @@ export function modal(msg, btnLabel = 'OK') {
   return new Promise((resolve) => {
     const dlg = $('#modal');
     $('#modal-text').textContent = msg;
+    $('#modal-cancel').hidden = true;
     const btn = $('#modal-btn');
     btn.textContent = btnLabel;
     btn.onclick = () => { dlg.close(); resolve(); };
+    dlg.oncancel = () => resolve();
+    dlg.showModal();
+  });
+}
+
+// Two-button variant; resolves true on OK, false on cancel/Esc.
+export function confirmModal(msg, okLabel = 'YES') {
+  return new Promise((resolve) => {
+    const dlg = $('#modal');
+    $('#modal-text').textContent = msg;
+    const ok = $('#modal-btn');
+    const cancel = $('#modal-cancel');
+    cancel.hidden = false;
+    ok.textContent = okLabel;
+    ok.onclick = () => { dlg.close(); resolve(true); };
+    cancel.onclick = () => { dlg.close(); resolve(false); };
+    dlg.oncancel = () => resolve(false);
     dlg.showModal();
   });
 }
@@ -95,6 +113,17 @@ export class GameUI {
     });
     $('#btn-exit').addEventListener('click', () => this._leave());
     $('#btn-lobby-leave').addEventListener('click', () => this._leave());
+
+    // Quit to main menu mid-match (game screen + intermission), with a
+    // confirm so a stray click doesn't end the battle.
+    const quitWithConfirm = async () => {
+      sfx.click();
+      if (await confirmModal('Quit to the main menu? This ends the battle for both players!', 'QUIT')) {
+        this._leave();
+      }
+    };
+    $('#btn-quit-game').addEventListener('click', quitWithConfirm);
+    $('#btn-quit-intermission').addEventListener('click', quitWithConfirm);
 
     $$('.answer-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
