@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HMMM? — 2-Player Trivia Battle</title>
+  <meta name="description" content="HMMM? A real-time 2-player trivia battle royale. Share a code, race to answer, spend points on power-ups.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>🤔</text></svg>">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="bg-pattern" aria-hidden="true"></div>
+
+  <main id="app">
+
+    <!-- ============ TITLE SCREEN ============ -->
+    <section id="screen-title" class="screen active">
+      <div class="title-blob blob-1" aria-hidden="true"></div>
+      <div class="title-blob blob-2" aria-hidden="true"></div>
+      <div class="title-blob blob-3" aria-hidden="true"></div>
+      <h1 class="game-logo" aria-label="HMMM?">
+        <span class="logo-letter l1">H</span><span class="logo-letter l2">M</span><span class="logo-letter l3">M</span><span class="logo-letter l4">M</span><span class="logo-letter l5">?</span>
+      </h1>
+      <p class="tagline">THE 2-PLAYER TRIVIA BATTLE ROYALE</p>
+
+      <div class="name-row">
+        <label for="player-name" class="name-label">YOUR NAME</label>
+        <input id="player-name" type="text" maxlength="12" spellcheck="false" autocomplete="off">
+        <button id="btn-reroll-name" class="btn btn-small btn-yellow" title="Random name">🎲</button>
+      </div>
+
+      <div class="title-buttons">
+        <button id="btn-host" class="btn btn-big btn-pink">HOST&nbsp;GAME</button>
+        <button id="btn-join" class="btn btn-big btn-teal">JOIN&nbsp;GAME</button>
+      </div>
+      <p id="title-error" class="error-text" role="alert"></p>
+      <p class="credits">grab a friend · share a code · get smart or get squashed</p>
+    </section>
+
+    <!-- ============ JOIN SCREEN ============ -->
+    <section id="screen-join" class="screen">
+      <h2 class="screen-heading">ENTER ROOM CODE</h2>
+      <div class="code-inputs" id="code-inputs">
+        <input class="code-box" maxlength="1" inputmode="latin" autocomplete="off" spellcheck="false" aria-label="code character 1">
+        <input class="code-box" maxlength="1" inputmode="latin" autocomplete="off" spellcheck="false" aria-label="code character 2">
+        <input class="code-box" maxlength="1" inputmode="latin" autocomplete="off" spellcheck="false" aria-label="code character 3">
+        <input class="code-box" maxlength="1" inputmode="latin" autocomplete="off" spellcheck="false" aria-label="code character 4">
+      </div>
+      <p id="join-error" class="error-text" role="alert"></p>
+      <div class="row-buttons">
+        <button id="btn-join-go" class="btn btn-big btn-lime">JOIN!</button>
+        <button id="btn-join-back" class="btn btn-purple">← BACK</button>
+      </div>
+    </section>
+
+    <!-- ============ LOBBY SCREEN ============ -->
+    <section id="screen-lobby" class="screen">
+      <h2 class="screen-heading">GAME LOBBY</h2>
+
+      <div class="room-code-wrap">
+        <span class="room-code-label">ROOM CODE</span>
+        <div id="room-code" class="room-code">····</div>
+        <button id="btn-copy-code" class="btn btn-small btn-yellow">COPY</button>
+      </div>
+
+      <div class="lobby-players">
+        <div class="lobby-player" id="lobby-p1">
+          <div class="clay-avatar avatar-pink"><span class="avatar-face">·‿·</span></div>
+          <span class="lobby-player-name" id="lobby-p1-name">—</span>
+        </div>
+        <div class="vs-badge">VS</div>
+        <div class="lobby-player" id="lobby-p2">
+          <div class="clay-avatar avatar-teal waiting" id="lobby-p2-avatar"><span class="avatar-face">z_z</span></div>
+          <span class="lobby-player-name" id="lobby-p2-name">waiting…</span>
+        </div>
+      </div>
+
+      <div class="settings-panel" id="settings-panel">
+        <div class="setting-group">
+          <span class="setting-label">DIFFICULTY</span>
+          <div class="setting-options" data-setting="difficulty">
+            <button class="chip" data-value="easy">EASY</button>
+            <button class="chip selected" data-value="medium">MEDIUM</button>
+            <button class="chip" data-value="hard">HARD</button>
+            <button class="chip" data-value="increasing">RAMP&nbsp;UP!</button>
+          </div>
+        </div>
+        <div class="setting-group">
+          <span class="setting-label">TIMER</span>
+          <div class="setting-options" data-setting="timer">
+            <button class="chip" data-value="30">30 SEC</button>
+            <button class="chip selected" data-value="60">1 MIN</button>
+            <button class="chip" data-value="0">NO TIMER</button>
+          </div>
+        </div>
+        <div class="setting-group">
+          <span class="setting-label">ROUNDS <small>(10 Qs each)</small></span>
+          <div class="setting-options" data-setting="rounds">
+            <button class="chip selected" data-value="1">1</button>
+            <button class="chip" data-value="2">2</button>
+            <button class="chip" data-value="3">3</button>
+            <button class="chip" data-value="5">5</button>
+          </div>
+        </div>
+      </div>
+
+      <p id="lobby-status" class="lobby-status">Share the code with your opponent!</p>
+      <div class="row-buttons">
+        <button id="btn-start" class="btn btn-big btn-pink" disabled>START&nbsp;BATTLE!</button>
+        <button id="btn-lobby-leave" class="btn btn-purple">← LEAVE</button>
+      </div>
+    </section>
+
+    <!-- ============ GAME SCREEN ============ -->
+    <section id="screen-game" class="screen">
+      <header class="hud">
+        <div class="hud-player me" id="hud-me">
+          <div class="clay-avatar avatar-pink small"><span class="avatar-face">·‿·</span></div>
+          <div class="hud-player-info">
+            <span class="hud-name" id="hud-me-name">YOU</span>
+            <span class="hud-score" id="hud-me-score">0</span>
+          </div>
+          <div class="hud-effects" id="hud-me-effects"></div>
+        </div>
+
+        <div class="hud-center">
+          <div class="hud-round" id="hud-round">R1 · Q1/10</div>
+          <div class="timer-wrap" id="timer-wrap">
+            <div class="timer-bar" id="timer-bar"></div>
+            <span class="timer-num" id="timer-num">60</span>
+          </div>
+        </div>
+
+        <div class="hud-player them" id="hud-them">
+          <div class="hud-effects" id="hud-them-effects"></div>
+          <div class="hud-player-info">
+            <span class="hud-name" id="hud-them-name">THEM</span>
+            <span class="hud-score" id="hud-them-score">0</span>
+          </div>
+          <div class="clay-avatar avatar-teal small"><span class="avatar-face">·‿·</span></div>
+        </div>
+      </header>
+
+      <div class="game-body">
+        <div class="question-zone">
+          <div class="question-card" id="question-card">
+            <div class="q-meta"><span id="q-category" class="q-category">—</span><span id="q-difficulty" class="q-difficulty">—</span></div>
+            <p class="q-text" id="q-text">Get ready…</p>
+          </div>
+          <div class="countdown-overlay" id="countdown-overlay"><span id="countdown-num">3</span></div>
+          <div class="answers-grid" id="answers-grid">
+            <button class="answer-btn" data-idx="0"><span class="answer-key">A</span><span class="answer-text"></span></button>
+            <button class="answer-btn" data-idx="1"><span class="answer-key">B</span><span class="answer-text"></span></button>
+            <button class="answer-btn" data-idx="2"><span class="answer-key">C</span><span class="answer-text"></span></button>
+            <button class="answer-btn" data-idx="3"><span class="answer-key">D</span><span class="answer-text"></span></button>
+          </div>
+          <div class="verdict-banner" id="verdict-banner"></div>
+        </div>
+
+        <aside class="shop" id="shop">
+          <h3 class="shop-title">POWER-UPS</h3>
+          <div class="shop-items" id="shop-items"></div>
+        </aside>
+      </div>
+
+      <div class="freeze-overlay" id="freeze-overlay" aria-hidden="true">
+        <span class="freeze-text">❄ FROZEN! ❄</span>
+      </div>
+    </section>
+
+    <!-- ============ INTERMISSION SCREEN ============ -->
+    <section id="screen-intermission" class="screen">
+      <h2 class="screen-heading" id="intermission-heading">ROUND 1 DONE!</h2>
+      <div class="scoreboard" id="intermission-board"></div>
+      <p class="lobby-status" id="intermission-status"></p>
+      <div class="row-buttons">
+        <button id="btn-next-round" class="btn btn-big btn-lime">NEXT ROUND →</button>
+      </div>
+    </section>
+
+    <!-- ============ GAME OVER SCREEN ============ -->
+    <section id="screen-gameover" class="screen">
+      <div class="confetti-layer" id="confetti-layer" aria-hidden="true"></div>
+      <h2 class="gameover-title" id="gameover-title">YOU WIN!</h2>
+      <div class="scoreboard" id="final-board"></div>
+      <p class="lobby-status" id="gameover-status"></p>
+      <div class="row-buttons">
+        <button id="btn-rematch" class="btn btn-big btn-pink">REMATCH!</button>
+        <button id="btn-exit" class="btn btn-purple">EXIT</button>
+      </div>
+    </section>
+
+    <!-- opponent + self cursors -->
+    <div class="game-cursor them-cursor" id="cursor-them" aria-hidden="true">
+      <svg viewBox="0 0 40 44" width="34" height="38"><path class="cursor-body" d="M6 2 L34 20 L22 24 L28 38 L20 42 L14 27 L6 32 Z"/></svg>
+      <span class="cursor-tag" id="cursor-them-tag">THEM</span>
+    </div>
+
+    <!-- toast + modal -->
+    <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+    <dialog id="modal" class="modal">
+      <p id="modal-text"></p>
+      <button id="modal-btn" class="btn btn-pink">OK</button>
+    </dialog>
+
+    <button id="btn-mute" class="btn btn-small btn-yellow mute-btn" title="Toggle sound">🔊</button>
+  </main>
+
+  <script src="js/vendor/supabase.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

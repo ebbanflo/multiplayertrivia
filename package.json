@@ -1,0 +1,13 @@
+{
+  "name": "hmmm-trivia",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HMMM? — a real-time 2-player trivia battle royale (static site + Supabase realtime)",
+  "scripts": {
+    "serve": "python3 -m http.server 4173",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
