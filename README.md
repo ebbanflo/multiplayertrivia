@@ -71,7 +71,7 @@ The game is a fully static site — no build step, no server of your own.
 1. Merge this branch into your default branch (or point Pages straight at it).
 2. Repo **Settings → Pages → Source: Deploy from a branch**, pick the branch
    and `/ (root)`, save.
-3. Play at `https://<username>.github.io/multiplayertrivia/`.
+3. Play at `https://ebbanflo.github.io/multiplayertrivia/`.
 
 ## How it works
 
