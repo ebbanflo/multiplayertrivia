@@ -291,6 +291,40 @@ test.describe('HMMM? two-player battle', () => {
     await expect(m2.guest.locator('#modal-text')).toHaveText(/HOSTY left the game/i);
   });
 
+  test('share links join in one tap; help overlay opens', async ({ context }) => {
+    await stubApis(context);
+    const host = await context.newPage();
+    await host.goto(APP);
+    await host.fill('#player-name', 'HOSTY');
+    await host.click('#btn-host');
+    await expect(host.locator('#room-code')).toHaveText(/^[A-Z0-9]{4}$/);
+    const code = (await host.locator('#room-code').textContent())?.trim();
+
+    // friend opens the shared link: host button gone, one-tap join
+    const friend = await context.newPage();
+    await friend.goto(`${APP}&join=${code}`);
+    await expect(friend.locator('#btn-host')).toBeHidden();
+    await expect(friend.locator('#btn-join')).toHaveText(`JOIN ROOM ${code}`);
+
+    // help overlay lists the rules and power-ups
+    await friend.click('#btn-help');
+    await expect(friend.locator('#help-modal')).toBeVisible();
+    await expect(friend.locator('#help-powerups')).toContainText('DOUBLE DOWN');
+    await friend.click('#btn-help-close');
+    await expect(friend.locator('#help-modal')).toBeHidden();
+
+    await friend.fill('#player-name', 'LINKY');
+    await friend.click('#btn-join');
+    await expect(friend.locator('#screen-lobby')).toBeVisible({ timeout: 10_000 });
+    await expect(host.locator('#lobby-players')).toContainText('LINKY');
+
+    // a dead link shows the error on the title screen
+    const lost = await context.newPage();
+    await lost.goto(`${APP}&join=ZZZZ`);
+    await lost.click('#btn-join');
+    await expect(lost.locator('#title-error')).toHaveText(/Room not found/, { timeout: 10_000 });
+  });
+
   test('joining a nonexistent room shows an error', async ({ context }) => {
     await stubApis(context);
     const page = await context.newPage();

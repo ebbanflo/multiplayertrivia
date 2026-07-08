@@ -56,6 +56,8 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   touch-action: manipulation;
+  /* no accidental pull-to-refresh mid-battle */
+  overscroll-behavior: none;
 }
 
 /* Memphis-style dotted/squiggle background */
@@ -746,6 +748,7 @@ body {
 @keyframes toast-out { to { transform: translateY(-14px); opacity: 0; } }
 
 .modal {
+  margin: auto; /* the global reset removes the UA centering — restore it */
   border: 4px solid var(--ink);
   border-radius: var(--blob-radius);
   box-shadow: var(--shadow-big);
@@ -759,6 +762,24 @@ body {
 }
 .modal::backdrop { background: rgba(43, 27, 68, 0.6); }
 .modal p { margin-bottom: 1rem; }
+
+.help-btn { position: absolute; top: 1rem; left: 1rem; z-index: 5; }
+.help-modal {
+  max-width: min(94vw, 34rem);
+  max-height: 84vh; overflow-y: auto;
+  text-align: left;
+  font-weight: 700;
+  font-size: clamp(0.85rem, 2.4vw, 1rem);
+}
+.help-heading {
+  font-family: var(--font-display);
+  font-size: clamp(1.3rem, 4.5vw, 1.9rem);
+  text-align: center;
+  margin-bottom: 0.7rem;
+  transform: rotate(-1.5deg);
+}
+.help-list { list-style: none; display: flex; flex-direction: column; gap: 0.55rem; margin-bottom: 0.9rem; }
+.help-modal .btn { display: block; margin: 0 auto; }
 
 /* +N / -N floating score popups */
 .score-pop {

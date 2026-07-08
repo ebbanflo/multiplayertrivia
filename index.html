@@ -15,6 +15,7 @@
 
     <!-- ============ TITLE SCREEN ============ -->
     <section id="screen-title" class="screen active">
+      <button id="btn-help" class="btn btn-small btn-yellow help-btn" title="How to play">?</button>
       <div class="title-blob blob-1" aria-hidden="true"></div>
       <div class="title-blob blob-2" aria-hidden="true"></div>
       <div class="title-blob blob-3" aria-hidden="true"></div>
@@ -61,6 +62,7 @@
         <span class="room-code-label">ROOM CODE</span>
         <div id="room-code" class="room-code">····</div>
         <button id="btn-copy-code" class="btn btn-small btn-yellow">COPY</button>
+        <button id="btn-copy-link" class="btn btn-small btn-lime">COPY&nbsp;LINK</button>
       </div>
 
       <div class="lobby-players" id="lobby-players"></div>
@@ -177,6 +179,18 @@
 
     <!-- toast + modal -->
     <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+    <dialog id="help-modal" class="modal help-modal">
+      <h3 class="help-heading">HOW TO PLAY</h3>
+      <ul class="help-list">
+        <li>🎯 <b>Everyone sees the same question.</b> First correct answer wins it: <b>+100</b> plus a speed bonus (up to +100).</li>
+        <li>💥 <b>Wrong answer: −50</b> and you're locked out of that question — and your pick is stamped on everyone's screen, so you've just eliminated an answer for your rivals.</li>
+        <li>⏱️ Timer per question, rounds, and difficulty are set by the host. 10 questions per round. Most points at the end wins!</li>
+        <li>🛒 <b>Spend points on power-ups mid-question:</b></li>
+      </ul>
+      <ul class="help-list" id="help-powerups"></ul>
+      <button id="btn-help-close" class="btn btn-pink">GOT IT!</button>
+    </dialog>
+
     <dialog id="modal" class="modal">
       <p id="modal-text"></p>
       <div class="row-buttons">

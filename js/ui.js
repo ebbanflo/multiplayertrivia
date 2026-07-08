@@ -70,6 +70,30 @@ function bumpScore(el, up) {
   el.classList.add(up ? 'bump-up' : 'bump-down');
 }
 
+// Haptic feedback on phones; a no-op elsewhere.
+function buzz(pattern) {
+  try { navigator.vibrate?.(pattern); } catch { /* not worth crashing over */ }
+}
+
+// Keep phone screens awake during a match. Browsers silently release
+// the lock when the tab is hidden, so we re-acquire on return.
+let wakeLock = null;
+let wantWakeLock = false;
+async function acquireWakeLock() {
+  wantWakeLock = true;
+  try {
+    if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+  } catch { /* low battery / unsupported — fine */ }
+}
+function releaseWakeLock() {
+  wantWakeLock = false;
+  try { wakeLock?.release(); } catch { /* already gone */ }
+  wakeLock = null;
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && wantWakeLock) acquireWakeLock();
+});
+
 export class GameUI {
   constructor(engine) {
     this.g = engine;
@@ -102,6 +126,20 @@ export class GameUI {
         toast('CODE COPIED!');
       } catch {
         toast(`CODE: ${this.g.t.code}`);
+      }
+    });
+
+    // Shareable link: friends land on a one-tap "JOIN ROOM XXXX" button.
+    $('#btn-copy-link').addEventListener('click', async () => {
+      sfx.click();
+      const params = new URLSearchParams(location.search);
+      params.set('join', this.g.t.code);
+      const link = `${location.origin}${location.pathname}?${params}`;
+      try {
+        await navigator.clipboard.writeText(link);
+        toast('LINK COPIED! Paste it to your friends.');
+      } catch {
+        toast(link);
       }
     });
 
@@ -150,6 +188,7 @@ export class GameUI {
   }
 
   _leave() {
+    releaseWakeLock();
     this.g.quit();
     // Full reset, keeping query params (transport mode etc.)
     location.href = location.pathname + location.search;
@@ -179,6 +218,7 @@ export class GameUI {
       this._setScores();
       $('#hud-me-effects').innerHTML = '';
       showScreen('screen-game');
+      acquireWakeLock();
       sfx.go();
     });
 
@@ -207,6 +247,7 @@ export class GameUI {
       this._setScores(data.delta ? { [data.playerId]: data.delta } : null);
       if (mine) {
         sfx.wrong();
+        buzz([70, 50, 70]);
         const btn = $$('.answer-btn')[data.idx];
         if (btn) btn.classList.add('wrong-reveal');
         this._banner(data.shielded ? '🛡️ SHIELDED!' : 'WRONG!', data.shielded ? 'info' : 'bad');
@@ -235,6 +276,7 @@ export class GameUI {
       } else {
         if (data.type === 'freeze') {
           sfx.freeze();
+          buzz(250);
           this._showFreeze();
         } else {
           toast(`${g.playerName(data.playerId).toUpperCase()} bought ${def.icon} ${def.name}!`);
@@ -262,6 +304,7 @@ export class GameUI {
 
     g.onUI('game-end', ({ scores, winnerIds }) => {
       this._stopTimer();
+      releaseWakeLock();
       const won = winnerIds.includes(g.me.id);
       const tie = winnerIds.length > 1;
       $('#gameover-title').textContent = tie ? "IT'S A TIE?!" : (won ? 'YOU WIN!' : 'SQUASHED!');
@@ -286,6 +329,7 @@ export class GameUI {
 
     g.onUI('opponent-left', ({ name }) => {
       this._stopTimer();
+      releaseWakeLock();
       modal(`${(name || 'Your opponent').toUpperCase()} left the game!`).then(() => this._leave());
     });
   }

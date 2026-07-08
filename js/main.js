@@ -1,6 +1,6 @@
 // Entry point: title screen, matchmaking, and session bootstrap.
 
-import { CODE_ALPHABET, CODE_LENGTH, DEBUG } from './config.js';
+import { CODE_ALPHABET, CODE_LENGTH, DEBUG, TRANSPORT, POWERUPS } from './config.js';
 import { createTransport } from './net.js';
 import { Game } from './game.js';
 import { GameUI, showScreen, toast } from './ui.js';
@@ -33,7 +33,14 @@ function playerId() {
 function showError(el, msg) {
   el.textContent = msg;
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 4000);
+  setTimeout(() => el.classList.remove('show'), 6000);
+}
+
+// Free-tier Supabase projects doze off after a quiet week; a connection
+// failure is far more likely to be that than anything the player can fix.
+function connectFailMessage(err) {
+  if (TRANSPORT !== 'supabase') return `Couldn't connect: ${err.message}`;
+  return "Couldn't connect! The game server may be napping — it dozes off after a quiet week. The game's owner can wake it at supabase.com.";
 }
 
 let session = null; // { transport, engine, ui }
@@ -59,7 +66,7 @@ async function hostGame() {
     session.engine.ui('lobby-update', session.engine.lobbyView());
     sfx.join();
   } catch (err) {
-    showError($('#title-error'), `Couldn't connect: ${err.message}`);
+    showError($('#title-error'), connectFailMessage(err));
     if (session) session.engine.destroy();
     session = null;
   } finally {
@@ -67,7 +74,9 @@ async function hostGame() {
   }
 }
 
-async function joinGame(code) {
+// errEl: where failures surface — the join screen normally, the title
+// screen when arriving through a shared ?join= link.
+async function joinGame(code, errEl = $('#join-error')) {
   const btn = $('#btn-join-go');
   btn.disabled = true;
   try {
@@ -84,12 +93,12 @@ async function joinGame(code) {
     if (!found) {
       session.engine.destroy();
       session = null;
-      showError($('#join-error'), 'Room not found! Check the code with your host.');
+      showError(errEl, 'Room not found! Check the code with your host.');
       return;
     }
     sfx.join();
   } catch (err) {
-    showError($('#join-error'), `Couldn't connect: ${err.message}`);
+    showError(errEl, connectFailMessage(err));
     if (session) session.engine.destroy();
     session = null;
   } finally {
@@ -105,13 +114,34 @@ function initTitle() {
     $('#player-name').value = randomName();
   });
 
+  // Arriving through a shared link (?join=CODE): one big button straight
+  // into the friend's room — no code to type.
+  const linkCode = (new URLSearchParams(location.search).get('join') || '').toUpperCase();
+  const hasLinkCode = new RegExp(`^[A-Z0-9]{${CODE_LENGTH}}$`).test(linkCode);
+  if (hasLinkCode) {
+    $('#btn-host').style.display = 'none';
+    $('#btn-join').textContent = `JOIN ROOM ${linkCode}`;
+  }
+
   $('#btn-host').addEventListener('click', () => { sfx.click(); hostGame(); });
   $('#btn-join').addEventListener('click', () => {
     sfx.click();
+    if (hasLinkCode) {
+      joinGame(linkCode, $('#title-error'));
+      return;
+    }
     showScreen('screen-join');
     $$('.code-box').forEach((b) => { b.value = ''; });
     $$('.code-box')[0].focus();
   });
+
+  // How-to-play overlay
+  const helpDlg = $('#help-modal');
+  $('#help-powerups').innerHTML = Object.values(POWERUPS)
+    .map((p) => `<li>${p.icon} <b>${p.name}</b> (${p.cost} pts) — ${p.desc.toLowerCase()}</li>`)
+    .join('');
+  $('#btn-help').addEventListener('click', () => { sfx.click(); helpDlg.showModal(); });
+  $('#btn-help-close').addEventListener('click', () => { sfx.click(); helpDlg.close(); });
   $('#btn-join-back').addEventListener('click', () => { sfx.click(); showScreen('screen-title'); });
 
   // code boxes: auto-advance, backspace, paste
