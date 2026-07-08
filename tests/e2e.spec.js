@@ -49,7 +49,8 @@ const engineState = (page) => page.evaluate(() => {
     phase: e.phase,
     qKey: e.currentQ && e.currentQ.qKey,
     myScore: e.scores[e.me.id] ?? 0,
-    theirScore: (e.opponent && e.scores[e.opponent.id]) ?? 0,
+    scores: { ...e.scores },
+    rosterNames: e.roster.map((p) => p.name),
     correctIndex: e.currentQ && e.currentQ.q.correctIndex,
   };
 });
@@ -74,6 +75,17 @@ async function waitForReveal(page) {
   }, undefined, { timeout: 45_000 });
 }
 
+async function joinAs(context, code, name) {
+  const page = await context.newPage();
+  await page.goto(APP);
+  await page.fill('#player-name', name);
+  await page.click('#btn-join');
+  const boxes = page.locator('.code-box');
+  for (let i = 0; i < 4; i++) await boxes.nth(i).fill(code[i]);
+  await page.click('#btn-join-go');
+  return page;
+}
+
 async function setupMatch(context, { timer = '30' } = {}) {
   const host = await context.newPage();
   await host.goto(APP);
@@ -83,18 +95,12 @@ async function setupMatch(context, { timer = '30' } = {}) {
   const code = (await host.locator('#room-code').textContent())?.trim();
   expect(code).toMatch(/^[A-Z0-9]{4}$/);
 
-  const guest = await context.newPage();
-  await guest.goto(APP);
-  await guest.fill('#player-name', 'GUESTO');
-  await guest.click('#btn-join');
-  const boxes = guest.locator('.code-box');
-  for (let i = 0; i < 4; i++) await boxes.nth(i).fill(code[i]);
-  await guest.click('#btn-join-go');
+  const guest = await joinAs(context, code, 'GUESTO');
   await expect(guest.locator('#screen-lobby')).toBeVisible();
 
   // Both lobbies show both names
-  await expect(host.locator('#lobby-p2-name')).toHaveText('GUESTO');
-  await expect(guest.locator('#lobby-p1-name')).toHaveText('HOSTY');
+  await expect(host.locator('#lobby-players')).toContainText('GUESTO');
+  await expect(guest.locator('#lobby-players')).toContainText('HOSTY');
 
   // Host picks the timer mode
   await host.click(`[data-setting="timer"] .chip[data-value="${timer}"]`);
@@ -225,8 +231,7 @@ test.describe('HMMM? two-player battle', () => {
     await guest.click('#btn-rematch');
     await waitForAnswering(host, '1-0');
     hs = await engineState(host);
-    expect(hs.myScore).toBe(0);
-    expect(hs.theirScore).toBe(0);
+    expect(Object.values(hs.scores).every((s) => s === 0)).toBe(true);
     await expect(guest.locator('#screen-game')).toBeVisible();
   });
 
@@ -298,18 +303,76 @@ test.describe('HMMM? two-player battle', () => {
     await expect(page.locator('#join-error')).toHaveText(/Room not found/, { timeout: 10_000 });
   });
 
-  test('a third player is turned away from a full room', async ({ context }) => {
+  test('four-player battle: multi-stamps, freeze-all, dropout, fifth rejected', async ({ context }) => {
     await stubApis(context);
-    const { code } = await setupMatch(context);
+    const { host, guest, code } = await setupMatch(context, { timer: '30' });
 
-    const third = await context.newPage();
-    await third.goto(APP);
-    await third.fill('#player-name', 'CROWDY');
-    await third.click('#btn-join');
-    const boxes = third.locator('.code-box');
-    for (let i = 0; i < 4; i++) await boxes.nth(i).fill(code[i]);
-    await third.click('#btn-join-go');
-    await expect(third.locator('#modal')).toBeVisible({ timeout: 10_000 });
-    await expect(third.locator('#modal-text')).toHaveText(/full|mid-battle/);
+    const b1 = guest; // GUESTO — seated by setupMatch
+    const b2 = await joinAs(context, code, 'BLOBB');
+    const b3 = await joinAs(context, code, 'BLOBC');
+    await expect(host.locator('#lobby-players')).toContainText('BLOBC');
+    for (const page of [b1, b2, b3]) {
+      await expect(page.locator('#lobby-players')).toContainText('HOSTY');
+    }
+
+    // A fifth player is turned away from the full lobby.
+    const late = await joinAs(context, code, 'LATEY');
+    await expect(late.locator('#modal')).toBeVisible({ timeout: 10_000 });
+    await expect(late.locator('#modal-text')).toHaveText(/full|mid-battle/);
+    await late.click('#modal-btn');
+
+    await host.click('#btn-start');
+    const everyone = [host, b1, b2, b3];
+
+    // ---- Q1: two players whiff (both stamps visible), BLOBC steals ----
+    for (const page of everyone) await waitForAnswering(page, '1-0');
+    const q1 = await host.locator('#q-text').textContent();
+    for (const page of [b1, b2, b3]) {
+      expect(await page.locator('#q-text').textContent()).toBe(q1);
+    }
+    await clickAnswer(b1, { correct: false });
+    await clickAnswer(b2, { correct: false });
+    await expect(host.locator('.answer-stamp.wrong')).toHaveCount(2);
+    await expect(host.locator('.answer-stamp.wrong').first()).toContainText(/GUESTO|BLOB/);
+    await clickAnswer(b3, { correct: true });
+    await waitForReveal(host);
+    await expect(host.locator('#verdict-banner')).toHaveText(/BLOBC GOT IT!/);
+    await expect(host.locator('.answer-stamp.correct')).toContainText('BLOBC');
+    let s = await engineState(host);
+    expect(Object.values(s.scores).filter((x) => x === -50)).toHaveLength(2);
+
+    // ---- Q2: BLOBC freezes EVERYONE else ----
+    for (const page of everyone) await waitForAnswering(page, '1-1');
+    await b3.click('.powerup-btn[data-type="freeze"]');
+    for (const page of [host, b1, b2]) {
+      await expect(page.locator('#freeze-overlay')).toHaveClass(/show/);
+    }
+    await expect(b3.locator('#freeze-overlay')).not.toHaveClass(/show/);
+    await clickAnswer(b3, { correct: true });
+    await waitForReveal(host);
+
+    // ---- Q3: BLOBA quits mid-question; the battle continues with 3 ----
+    for (const page of everyone) await waitForAnswering(page, '1-2');
+    await b1.click('#btn-quit-game');
+    await b1.click('#modal-btn');
+    await expect(b1.locator('#screen-title')).toBeVisible({ timeout: 10_000 });
+    await expect.poll(async () => (await engineState(host)).rosterNames.length, { timeout: 10_000 }).toBe(3);
+    await clickAnswer(host, { correct: true });
+    await waitForReveal(host);
+
+    // ---- host takes the rest ----
+    for (let i = 3; i < 10; i++) {
+      await waitForAnswering(host, `1-${i}`);
+      await clickAnswer(host, { correct: true });
+      await waitForReveal(host);
+    }
+
+    await expect(host.locator('#screen-gameover')).toBeVisible({ timeout: 15_000 });
+    await expect(host.locator('#gameover-title')).toHaveText('YOU WIN!');
+    await expect(b2.locator('#gameover-title')).toHaveText('SQUASHED!');
+    await expect(b3.locator('#gameover-title')).toHaveText('SQUASHED!');
+    // final board shows the 3 remaining players on every screen
+    await expect(host.locator('#final-board .score-card')).toHaveCount(3);
+    await expect(b3.locator('#final-board .score-card')).toHaveCount(3);
   });
 });

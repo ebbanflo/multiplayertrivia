@@ -76,7 +76,7 @@ async function joinGame(code) {
     const found = await new Promise((resolve) => {
       const deadline = setTimeout(() => resolve(false), 4500);
       const check = () => {
-        if (session.engine.opponent) { clearTimeout(deadline); resolve(true); }
+        if (session.engine.hostPresent) { clearTimeout(deadline); resolve(true); }
         else setTimeout(check, 120);
       };
       check();

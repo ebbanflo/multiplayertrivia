@@ -1,11 +1,16 @@
 // UI layer: renders engine events into the DOM. All game logic lives in
 // game.js; this file only reads engine state and paints.
+//
+// Player colors are assigned by roster slot (host = 0), so every player
+// sees the same color for the same person.
 
-import { POWERUPS, FREEZE_MS, QUESTIONS_PER_ROUND } from './config.js';
+import { POWERUPS, FREEZE_MS, QUESTIONS_PER_ROUND, MAX_PLAYERS } from './config.js';
 import { sfx } from './audio.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
+
+const FACES = ['·‿·', '•ᴗ•', '˙ᵕ˙', '·o·'];
 
 export function showScreen(id) {
   $$('.screen').forEach((s) => s.classList.toggle('active', s.id === id));
@@ -69,7 +74,6 @@ export class GameUI {
   constructor(engine) {
     this.g = engine;
     this.timerRaf = null;
-    this.timerDuration = null;
     this.lastTickSecond = null;
     this.countdownTimers = [];
     this._bindDom();
@@ -107,7 +111,7 @@ export class GameUI {
       sfx.click();
       this.g.voteRematch();
       $('#btn-rematch').disabled = true;
-      $('#gameover-status').textContent = 'Waiting for your opponent to accept…';
+      $('#gameover-status').textContent = 'Waiting for the other players to accept…';
     });
     $('#btn-exit').addEventListener('click', () => this._leave());
     $('#btn-lobby-leave').addEventListener('click', () => this._leave());
@@ -116,7 +120,7 @@ export class GameUI {
     // confirm so a stray click doesn't end the battle.
     const quitWithConfirm = async () => {
       sfx.click();
-      if (await confirmModal('Quit to the main menu? This ends the battle for both players!', 'QUIT')) {
+      if (await confirmModal('Quit to the main menu? You leave the battle for good!', 'QUIT')) {
         this._leave();
       }
     };
@@ -159,20 +163,21 @@ export class GameUI {
 
     g.onUI('loading', ({ on }) => {
       $('#lobby-status').textContent = on ? 'Fetching questions from the trivia mines…' : '';
-      $('#btn-start').disabled = on || !g.opponent;
+      $('#btn-start').disabled = on || g.roster.length < 2;
     });
 
     g.onUI('room-full', ({ inGame }) => {
-      modal(inGame ? 'That room is mid-battle. Try another code!' : 'That room is full! Two clay warriors max.')
+      modal(inGame ? 'That room is mid-battle. Try another code!' : `That room is full! ${MAX_PLAYERS} clay warriors max.`)
         .then(() => this._leave());
     });
 
     g.onUI('game-start', () => {
       $('#hud-me-name').textContent = g.me.name.toUpperCase();
-      $('#hud-them-name').textContent = (g.opponent?.name || 'THEM').toUpperCase();
+      const meAvatar = $('#hud-me-avatar');
+      meAvatar.className = `clay-avatar small pcolor-${g.playerSlot(g.me.id)}`;
+      this._renderOthersHud();
       this._setScores();
       $('#hud-me-effects').innerHTML = '';
-      $('#hud-them-effects').innerHTML = '';
       showScreen('screen-game');
       sfx.go();
     });
@@ -208,10 +213,10 @@ export class GameUI {
         this._setAnswersEnabled(false);
         if (data.shielded) this._refreshFxBadges();
       } else {
-        // Show exactly which answer the opponent whiffed on.
+        // Show exactly which answer they whiffed on.
         sfx.steal();
-        this._stampAnswer(data.idx, g.opponent?.name, 'wrong');
-        toast(`${(g.opponent?.name || 'THEM').toUpperCase()} WHIFFED! ${data.shielded ? '(shielded)' : ''}`);
+        this._stampAnswer(data.idx, data.playerId, 'wrong');
+        toast(`${g.playerName(data.playerId).toUpperCase()} WHIFFED! ${data.shielded ? '(shielded)' : ''}`);
       }
       this._refreshShop();
     });
@@ -232,7 +237,7 @@ export class GameUI {
           sfx.freeze();
           this._showFreeze();
         } else {
-          toast(`${(g.opponent?.name || 'THEM').toUpperCase()} bought ${def.icon} ${def.name}!`);
+          toast(`${g.playerName(data.playerId).toUpperCase()} bought ${def.icon} ${def.name}!`);
         }
       }
     });
@@ -247,7 +252,7 @@ export class GameUI {
       $('#btn-next-round').style.display = isHost ? '' : 'none';
       $('#intermission-status').textContent = isHost
         ? 'Take a breath, then hit it!'
-        : `Waiting for ${(g.opponent?.name || 'the host').toUpperCase()} to start the next round…`;
+        : `Waiting for ${g.roster[0] ? g.roster[0].name.toUpperCase() : 'the host'} to start the next round…`;
       showScreen('screen-intermission');
     });
 
@@ -255,20 +260,28 @@ export class GameUI {
       showScreen('screen-game');
     });
 
-    g.onUI('game-end', ({ scores, winnerId }) => {
+    g.onUI('game-end', ({ scores, winnerIds }) => {
       this._stopTimer();
-      const won = winnerId === g.me.id;
-      const tie = winnerId === null;
+      const won = winnerIds.includes(g.me.id);
+      const tie = winnerIds.length > 1;
       $('#gameover-title').textContent = tie ? "IT'S A TIE?!" : (won ? 'YOU WIN!' : 'SQUASHED!');
-      this._renderBoard($('#final-board'), scores, winnerId);
+      this._renderBoard($('#final-board'), scores, winnerIds);
       $('#btn-rematch').disabled = false;
-      $('#gameover-status').textContent = tie ? 'Great minds squish alike.' : (won ? 'Absolute trivia titan.' : 'Avenge yourself with a rematch!');
+      $('#gameover-status').textContent = tie
+        ? 'Great minds squish alike.'
+        : (won ? 'Absolute trivia titan.' : 'Avenge yourself with a rematch!');
       showScreen('screen-gameover');
-      if (won) { sfx.fanfare(); this._confetti(); } else if (tie) { sfx.join(); } else { sfx.womp(); }
+      if (won && !tie) { sfx.fanfare(); this._confetti(); } else if (tie) { sfx.join(); } else { sfx.womp(); }
     });
 
     g.onUI('rematch-vote', ({ from }) => {
-      if (from !== g.me.id) toast(`${(g.opponent?.name || 'THEM').toUpperCase()} WANTS A REMATCH!`);
+      if (from !== g.me.id) toast(`${g.playerName(from).toUpperCase()} WANTS A REMATCH!`);
+    });
+
+    g.onUI('player-left', ({ name }) => {
+      toast(`${(name || 'A PLAYER').toUpperCase()} BAILED! THE BATTLE RAGES ON.`);
+      this._renderOthersHud();
+      this._setScores();
     });
 
     g.onUI('opponent-left', ({ name }) => {
@@ -281,13 +294,27 @@ export class GameUI {
   _renderLobby(v) {
     showScreen('screen-lobby');
     $('#room-code').textContent = v.code;
-    $('#lobby-p1-name').textContent = (v.me.role === 'host' ? v.me.name : v.opponent?.name || '…').toUpperCase();
-    const p2 = v.me.role === 'host' ? v.opponent : v.me;
-    $('#lobby-p2-name').textContent = p2 ? p2.name.toUpperCase() : 'waiting…';
-    $('#lobby-p2-avatar').classList.toggle('waiting', !p2);
-    $('#lobby-p2-avatar .avatar-face').textContent = p2 ? '·‿·' : 'z_z';
 
-    $('#settings-panel').classList.toggle('readonly', !v.canStart && v.me.role !== 'host');
+    const wrap = $('#lobby-players');
+    wrap.innerHTML = '';
+    v.roster.forEach((p, slot) => {
+      const el = document.createElement('div');
+      el.className = 'lobby-player';
+      el.innerHTML = `
+        <div class="clay-avatar pcolor-${slot}"><span class="avatar-face">${FACES[slot % FACES.length]}</span></div>
+        <span class="lobby-player-name">${p.name.toUpperCase()}${p.id === v.me.id ? ' (YOU)' : ''}</span>`;
+      wrap.appendChild(el);
+    });
+    if (v.roster.length < v.maxPlayers) {
+      const el = document.createElement('div');
+      el.className = 'lobby-player';
+      el.innerHTML = `
+        <div class="clay-avatar waiting"><span class="avatar-face">z_z</span></div>
+        <span class="lobby-player-name">waiting…</span>`;
+      wrap.appendChild(el);
+    }
+
+    $('#settings-panel').classList.toggle('readonly', v.me.role !== 'host');
     $$('#settings-panel .setting-options').forEach((group) => {
       const key = group.dataset.setting;
       const current = String(v.settings[key]);
@@ -298,13 +325,33 @@ export class GameUI {
 
     if (v.me.role === 'host') {
       $('#btn-start').style.display = '';
-      $('#btn-start').disabled = !v.opponent;
-      $('#lobby-status').textContent = v.opponent
-        ? 'Opponent locked in. START WHEN READY!'
-        : 'Share the code with your opponent!';
+      $('#btn-start').disabled = !v.canStart;
+      $('#lobby-status').textContent = v.canStart
+        ? `${v.roster.length}/${v.maxPlayers} players in. START WHEN READY!`
+        : 'Share the code with 1-3 opponents!';
     } else {
       $('#btn-start').style.display = 'none';
-      $('#lobby-status').textContent = `Waiting for ${(v.opponent?.name || 'the host').toUpperCase()} to start…`;
+      $('#lobby-status').textContent = `${v.roster.length}/${v.maxPlayers} players in. Waiting for ${v.roster[0] ? v.roster[0].name.toUpperCase() : 'the host'} to start…`;
+    }
+  }
+
+  // ---------- HUD ----------
+  _renderOthersHud() {
+    const g = this.g;
+    const wrap = $('#hud-others');
+    wrap.innerHTML = '';
+    for (const p of g.others()) {
+      const slot = g.playerSlot(p.id);
+      const el = document.createElement('div');
+      el.className = 'hud-mini';
+      el.dataset.pid = p.id;
+      el.innerHTML = `
+        <div class="clay-avatar tiny pcolor-${slot}"><span class="avatar-face">${FACES[slot % FACES.length]}</span></div>
+        <div class="hud-player-info">
+          <span class="hud-name">${p.name.toUpperCase()}</span>
+          <span class="hud-score" data-score>0</span>
+        </div>`;
+      wrap.appendChild(el);
     }
   }
 
@@ -327,7 +374,7 @@ export class GameUI {
     $$('.answer-btn').forEach((btn, i) => {
       btn.className = 'answer-btn';
       btn.querySelector('.answer-text').textContent = q.answers[i] ?? '';
-      btn.querySelectorAll('.answer-stamp').forEach((s) => s.remove());
+      btn.querySelectorAll('.stamp-rail').forEach((s) => s.remove());
       btn.disabled = true;
     });
 
@@ -371,15 +418,25 @@ export class GameUI {
     });
   }
 
-  // Pin the opponent's name to the answer they chose, with a wobble-in
-  // animation — red-tinted shake for a miss, teal pop for a win.
-  _stampAnswer(idx, name, kind) {
+  // Pin a player's name to the answer they chose, in their color —
+  // red-edged shake for a miss, starred pop for the winning pick.
+  // Stamps stack in a rail so several players can mark the same answer.
+  _stampAnswer(idx, playerId, kind) {
+    const g = this.g;
     const btn = $$('.answer-btn')[idx];
-    if (!btn || btn.querySelector('.answer-stamp')) return;
+    if (!btn) return;
+    let rail = btn.querySelector('.stamp-rail');
+    if (!rail) {
+      rail = document.createElement('span');
+      rail.className = 'stamp-rail';
+      btn.appendChild(rail);
+    }
+    if (rail.querySelector(`[data-pid="${playerId}"]`)) return;
     const stamp = document.createElement('span');
-    stamp.className = `answer-stamp ${kind}`;
-    stamp.textContent = `${kind === 'wrong' ? '✖' : '★'} ${(name || 'THEM').toUpperCase()}`;
-    btn.appendChild(stamp);
+    stamp.className = `answer-stamp ${kind} pcolor-${g.playerSlot(playerId)}`;
+    stamp.dataset.pid = playerId;
+    stamp.textContent = `${kind === 'wrong' ? '✖' : '★'} ${g.playerName(playerId).toUpperCase()}`;
+    rail.appendChild(stamp);
     if (kind === 'wrong') btn.classList.add('them-wrong');
   }
 
@@ -425,8 +482,8 @@ export class GameUI {
       this._banner(data.doubled ? `✖️2 +${data.winDelta}!!` : `+${data.winDelta}!`, 'good');
     } else if (data.winnerId) {
       sfx.steal();
-      this._stampAnswer(data.correctIndex, this.g.opponent?.name, 'correct');
-      this._banner(`${(this.g.opponent?.name || 'THEM').toUpperCase()} GOT IT!`, 'bad');
+      this._stampAnswer(data.correctIndex, data.winnerId, 'correct');
+      this._banner(`${this.g.playerName(data.winnerId).toUpperCase()} GOT IT!`, 'bad');
     } else {
       sfx.womp();
       this._banner(data.reason === 'timeout' ? "TIME'S UP!" : 'NOBODY GOT IT!', 'info');
@@ -481,12 +538,17 @@ export class GameUI {
   _setScores(deltas) {
     const g = this.g;
     const meEl = $('#hud-me-score');
-    const themEl = $('#hud-them-score');
     meEl.textContent = g.scores[g.me.id] ?? 0;
-    themEl.textContent = (g.opponent && g.scores[g.opponent.id]) ?? 0;
+    const anchors = { [g.me.id]: meEl };
+    for (const chip of $$('#hud-others .hud-mini')) {
+      const scoreEl = chip.querySelector('[data-score]');
+      scoreEl.textContent = g.scores[chip.dataset.pid] ?? 0;
+      anchors[chip.dataset.pid] = scoreEl;
+    }
     if (deltas) {
       for (const [pid, d] of Object.entries(deltas)) {
-        const el = pid === g.me.id ? meEl : themEl;
+        const el = anchors[pid];
+        if (!el) continue;
         bumpScore(el, d >= 0);
         scorePop(el, d);
       }
@@ -538,21 +600,23 @@ export class GameUI {
   }
 
   // ---------- scoreboard / confetti ----------
-  _renderBoard(el, scores, winnerId) {
+  _renderBoard(el, scores, winnerIds = []) {
     const g = this.g;
     el.innerHTML = '';
-    const entries = [
-      { id: g.me.id, name: g.me.name, score: scores[g.me.id] ?? 0 },
-      ...(g.opponent ? [{ id: g.opponent.id, name: g.opponent.name, score: scores[g.opponent.id] ?? 0 }] : []),
-    ].sort((a, b) => b.score - a.score);
+    const entries = g.roster
+      .map((p) => ({ ...p, slot: g.playerSlot(p.id), score: scores[p.id] ?? 0 }))
+      .sort((a, b) => b.score - a.score);
     const top = entries[0]?.score;
     for (const e of entries) {
       const card = document.createElement('div');
-      const isLeader = e.score === top && entries.length > 1 && entries[0].score !== entries[1].score;
-      card.className = `score-card${isLeader ? ' leader' : ''}`;
+      const crowned = winnerIds.includes(e.id)
+        || (!winnerIds.length && e.score === top
+            && entries.filter((x) => x.score === top).length < entries.length);
+      card.className = `score-card${crowned ? ' leader' : ''}`;
       card.innerHTML = `
-        ${isLeader || winnerId === e.id ? '<span class="sc-crown">👑</span>' : ''}
-        <span class="sc-name">${e.name}</span>
+        ${crowned ? '<span class="sc-crown">👑</span>' : ''}
+        <div class="clay-avatar tiny pcolor-${e.slot}"><span class="avatar-face">${FACES[e.slot % FACES.length]}</span></div>
+        <span class="sc-name">${e.name}${e.id === g.me.id ? ' (you)' : ''}</span>
         <span class="sc-points">${e.score}</span>`;
       el.appendChild(card);
     }

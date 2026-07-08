@@ -18,6 +18,7 @@ export const DEBUG = params.get('debug') === '1';
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ123456789'; // no O/0/I
 export const CODE_LENGTH = 4;
 
+export const MAX_PLAYERS = 4;
 export const QUESTIONS_PER_ROUND = 10;
 export const COUNTDOWN_MS = 3000;      // 3..2..1 lead-in before answers unlock
 export const REVEAL_MS = 3200;         // pause on the answer reveal
@@ -29,7 +30,7 @@ export const SCORE_WRONG = -50;        // penalty for a wrong answer
 
 export const POWERUPS = {
   fifty:    { name: '50/50',       icon: '➗', cost: 75,  desc: 'Zap away two wrong answers' },
-  freeze:   { name: 'FREEZE',      icon: '🧊', cost: 100, desc: 'Freeze your opponent for 5s' },
+  freeze:   { name: 'FREEZE',      icon: '🧊', cost: 100, desc: 'Freeze ALL opponents for 5s' },
   timewarp: { name: 'TIME WARP',   icon: '⏰', cost: 75,  desc: '+15 seconds on YOUR clock' },
   shield:   { name: 'SHIELD',      icon: '🛡️', cost: 75,  desc: 'No penalty on your next miss' },
   double:   { name: 'DOUBLE DOWN', icon: '✖️', cost: 100, desc: '2x points on your next correct answer' },

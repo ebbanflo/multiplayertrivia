@@ -1,7 +1,11 @@
-// Game engine. The HOST is authoritative: it owns the question list,
-// scores, answer arbitration and power-up validation, and broadcasts
-// every state change. The GUEST mirrors state from host events. Both
-// roles run the same engine; host-only logic is guarded by this.isHost.
+// Game engine. The HOST is authoritative: it owns the roster, question
+// list, scores, answer arbitration and power-up validation, and
+// broadcasts every state change. GUESTS mirror state from host events.
+// Both roles run the same engine; host-only logic is guarded by
+// this.isHost.
+//
+// Rooms hold 2-4 players. All rules are written against the roster, so
+// a 2-player game behaves exactly like the original duel.
 //
 // UI code subscribes with engine.onUI(event, fn) and never touches the
 // network directly.
@@ -9,7 +13,7 @@
 import {
   QUESTIONS_PER_ROUND, COUNTDOWN_MS, REVEAL_MS, RESOLVE_GRACE_MS,
   SCORE_BASE, SCORE_SPEED_MAX, SCORE_WRONG,
-  POWERUPS, FREEZE_MS, TIMEWARP_MS,
+  POWERUPS, FREEZE_MS, TIMEWARP_MS, MAX_PLAYERS,
 } from './config.js';
 import { buildQuestionSet } from './questions.js';
 
@@ -18,7 +22,10 @@ export class Game {
     this.t = transport;
     this.me = self;                  // { id, name, role: 'host' | 'guest' }
     this.isHost = self.role === 'host';
-    this.opponent = null;            // { id, name }
+    // Roster order is assigned by the host (host first, guests in join
+    // order) and shared with everyone — it drives player colors.
+    this.roster = this.isHost ? [{ ...self }] : [];
+    this.hostPresent = this.isHost;
     this.settings = { difficulty: 'medium', timer: 60, rounds: 1 };
     this.phase = 'lobby';            // lobby|countdown|answering|reveal|intermission|gameover
     this.scores = {};                // playerId -> score
@@ -47,6 +54,14 @@ export class Game {
     this._wire();
   }
 
+  // ---------------- roster helpers ----------------
+  others() { return this.roster.filter((p) => p.id !== this.me.id); }
+  playerName(id) {
+    const p = this.roster.find((x) => x.id === id);
+    return p ? p.name : 'THEM';
+  }
+  playerSlot(id) { return this.roster.findIndex((x) => x.id === id); }
+
   // ---------------- UI plumbing ----------------
   onUI(event, fn) {
     if (!this.uiHandlers.has(event)) this.uiHandlers.set(event, []);
@@ -56,7 +71,7 @@ export class Game {
     for (const fn of this.uiHandlers.get(event) || []) fn(data);
   }
 
-  // Broadcast to the peer AND handle locally (transports never echo).
+  // Broadcast to peers AND handle locally (transports never echo).
   emit(type, data) {
     this.t.send(type, data);
     this._handle(type, this.me.id, data);
@@ -67,7 +82,7 @@ export class Game {
     const types = [
       'lobby-state', 'start-game', 'question', 'answer', 'timeup', 'buy',
       'powerup-applied', 'verdict', 'q-end', 'round-end', 'next-round',
-      'game-end', 'rematch-vote', 'quit',
+      'game-end', 'rematch-vote', 'player-left', 'quit',
     ];
     for (const type of types) {
       this.t.on(type, ({ from, data }) => this._handle(type, from, data));
@@ -90,40 +105,66 @@ export class Game {
 
   // ---------------- presence ----------------
   _onPresence(members) {
-    const others = members.filter((m) => m.id !== this.me.id);
     if (this.isHost) {
-      const guests = others.filter((m) => m.role === 'guest');
-      const guest = this.opponent
-        ? guests.find((m) => m.id === this.opponent.id)
-        : guests[0];
-      if (guest && !this.opponent) {
-        this.opponent = { id: guest.id, name: guest.name };
-        this.scores = { [this.me.id]: 0, [this.opponent.id]: 0 };
-        this._broadcastLobby();
-        this.ui('lobby-update', this.lobbyView());
-      } else if (!guest && this.opponent) {
-        const left = this.opponent;
-        this.opponent = null;
-        if (this.phase === 'lobby') {
-          this.ui('lobby-update', this.lobbyView());
+      const present = new Set(members.map((m) => m.id));
+      // Departures (any phase)
+      for (const p of this.others()) {
+        if (!present.has(p.id)) this._hostRemovePlayer(p.id);
+      }
+      // Arrivals: seat new guests while in the lobby, up to capacity.
+      const seated = new Set(this.roster.map((p) => p.id));
+      let changed = false;
+      let overflow = false;
+      for (const m of members) {
+        if (m.id === this.me.id || m.role !== 'guest' || seated.has(m.id)) continue;
+        if (this.phase === 'lobby' && this.roster.length < MAX_PLAYERS) {
+          this.roster.push({ id: m.id, name: m.name, role: 'guest' });
+          seated.add(m.id);
+          changed = true;
         } else {
-          this._clearHostTimers();
-          this.ui('opponent-left', { name: left.name });
+          overflow = true; // full room or mid-game — tell them via lobby-state
         }
       }
-      // Any extra guest beyond our opponent: re-broadcast the lobby so
-      // they learn the room is taken and bow out.
-      if (this.opponent && guests.some((m) => m.id !== this.opponent.id)) {
-        this._broadcastLobby();
-      }
+      if (changed || overflow) this._broadcastLobby();
+      if (changed) this.ui('lobby-update', this.lobbyView());
     } else {
-      const host = others.find((m) => m.role === 'host');
-      if (host && !this.opponent) {
-        this.opponent = { id: host.id, name: host.name };
-        this.ui('lobby-update', this.lobbyView());
-      } else if (!host && this.opponent && this.phase !== 'gameover') {
-        this.ui('opponent-left', { name: this.opponent.name });
+      const host = members.find((m) => m.id !== this.me.id && m.role === 'host');
+      if (host) {
+        const firstSighting = !this.hostPresent;
+        this.hostPresent = true;
+        if (!this.roster.length) this.roster = [{ ...host }, { ...this.me }];
+        // Show the lobby right away with a provisional roster; the
+        // host's authoritative lobby-state refines it moments later.
+        if (firstSighting && this.phase === 'lobby') {
+          this.ui('lobby-update', this.lobbyView());
+        }
+      } else if (this.hostPresent && this.phase !== 'gameover') {
+        // The host's browser referees the match — without it the room is dead.
+        this.hostPresent = false;
+        this.ui('opponent-left', { name: this.roster[0]?.name, fatal: true });
       }
+    }
+  }
+
+  // Host: drop a player from the room (disconnect or quit).
+  _hostRemovePlayer(id) {
+    if (!this.roster.some((p) => p.id === id)) return;
+    const name = this.playerName(id);
+    this.roster = this.roster.filter((p) => p.id !== id);
+    this.rematchVotes.delete(id);
+
+    if (this.phase === 'lobby') {
+      this._broadcastLobby();
+      this.ui('lobby-update', this.lobbyView());
+      return;
+    }
+    // Mid-game: everyone learns; the match continues if 2+ remain.
+    this.emit('player-left', { playerId: id, name, roster: this.roster });
+    if (this.roster.length < 2) {
+      this._clearHostTimers();
+    } else if (this.hq && !this.hq.resolved) {
+      this.hq.active.delete(id);
+      this._maybeResolve();
     }
   }
 
@@ -131,9 +172,10 @@ export class Game {
     return {
       code: this.t.code,
       me: this.me,
-      opponent: this.opponent,
+      roster: this.roster,
       settings: this.settings,
-      canStart: this.isHost && !!this.opponent,
+      canStart: this.isHost && this.roster.length >= 2,
+      maxPlayers: MAX_PLAYERS,
     };
   }
 
@@ -141,10 +183,7 @@ export class Game {
     if (!this.isHost) return;
     this.t.send('lobby-state', {
       settings: this.settings,
-      players: [
-        { id: this.me.id, name: this.me.name, role: 'host' },
-        ...(this.opponent ? [{ id: this.opponent.id, name: this.opponent.name, role: 'guest' }] : []),
-      ],
+      players: this.roster,
       inGame: this.phase !== 'lobby',
     });
   }
@@ -159,7 +198,7 @@ export class Game {
 
   // ---------------- host: game flow ----------------
   async start() {
-    if (!this.isHost || !this.opponent) return;
+    if (!this.isHost || this.roster.length < 2) return;
     this.ui('loading', { on: true });
     try {
       this.questions = await buildQuestionSet(
@@ -169,10 +208,14 @@ export class Game {
       this.ui('loading', { on: false });
     }
     this.qIndex = -1;
-    this.scores = { [this.me.id]: 0, [this.opponent.id]: 0 };
-    this.fx = { [this.me.id]: {}, [this.opponent.id]: {} };
+    this.scores = {};
+    this.fx = {};
+    for (const p of this.roster) {
+      this.scores[p.id] = 0;
+      this.fx[p.id] = {};
+    }
     this.rematchVotes.clear();
-    this.emit('start-game', { settings: this.settings, scores: this.scores });
+    this.emit('start-game', { settings: this.settings, roster: this.roster, scores: this.scores });
     this._after(600, () => this._nextQuestion());
   }
 
@@ -184,8 +227,10 @@ export class Game {
     this.hq = {
       qKey,
       q,
+      active: new Set(this.roster.map((p) => p.id)),
       answers: new Map(),
       lockedOut: new Set(),
+      timeups: new Set(),
       resolved: false,
       candidates: [],
       graceTimer: null,
@@ -209,9 +254,31 @@ export class Game {
     return Math.max(10, SCORE_SPEED_MAX - Math.floor(elapsedMs / 600));
   }
 
+  // Every active player has either answered or been locked out.
+  _allDone() {
+    const hq = this.hq;
+    for (const id of hq.active) {
+      if (!hq.answers.has(id) && !hq.lockedOut.has(id)) return false;
+    }
+    return true;
+  }
+
+  _maybeResolve() {
+    const hq = this.hq;
+    if (!hq || hq.resolved) return;
+    if (!this._allDone()) return;
+    if (hq.candidates.length) {
+      this._resolveOrEnd('correct');
+    } else if (hq.timeups.size && hq.timeups.size >= hq.lockedOut.size) {
+      this._resolveOrEnd('timeout');
+    } else {
+      this._resolveOrEnd('locked');
+    }
+  }
+
   _hostOnAnswer(playerId, { qKey, idx, elapsed }) {
     const hq = this.hq;
-    if (!hq || hq.resolved || hq.qKey !== qKey) return;
+    if (!hq || hq.resolved || hq.qKey !== qKey || !hq.active.has(playerId)) return;
     if (hq.answers.has(playerId) || hq.lockedOut.has(playerId)) return;
 
     const correct = idx === hq.q.correctIndex;
@@ -227,18 +294,12 @@ export class Game {
       this.emit('verdict', {
         qKey, playerId, idx, correct: false, shielded, delta, scores: { ...this.scores },
       });
-      if (hq.lockedOut.size >= 2) {
-        this._resolveOrEnd('locked');
-      } else if (hq.candidates.length) {
-        // The other player already answered correctly — no contest left.
-        this._resolveOrEnd('correct');
-      }
+      this._maybeResolve();
       return;
     }
 
     hq.candidates.push({ playerId, elapsed, idx });
-    const opponentDone = hq.lockedOut.has(this._other(playerId)) || hq.answers.has(this._other(playerId));
-    if (opponentDone) {
+    if (this._allDone()) {
       this._resolveOrEnd('correct');
     } else if (!hq.graceTimer) {
       // Brief grace window so a slightly-slower network doesn't decide
@@ -250,18 +311,11 @@ export class Game {
 
   _hostOnTimeup(playerId, { qKey }) {
     const hq = this.hq;
-    if (!hq || hq.resolved || hq.qKey !== qKey) return;
+    if (!hq || hq.resolved || hq.qKey !== qKey || !hq.active.has(playerId)) return;
     if (hq.answers.has(playerId) || hq.lockedOut.has(playerId)) return;
     hq.lockedOut.add(playerId);
-    if (hq.candidates.length) {
-      this._resolveOrEnd('correct');
-    } else if (hq.lockedOut.size >= 2) {
-      this._resolveOrEnd('timeout');
-    }
-  }
-
-  _other(playerId) {
-    return playerId === this.me.id ? (this.opponent && this.opponent.id) : this.me.id;
+    hq.timeups.add(playerId);
+    this._maybeResolve();
   }
 
   _resolveOrEnd(reason) {
@@ -299,11 +353,12 @@ export class Game {
 
     this._after(REVEAL_MS, () => {
       if (isLastQuestion) {
-        const [a, b] = [this.me.id, this.opponent && this.opponent.id];
-        const winner = this.scores[a] === this.scores[b] ? null
-          : (this.scores[a] > this.scores[b] ? a : b);
+        const top = Math.max(...this.roster.map((p) => this.scores[p.id] ?? 0));
+        const winnerIds = this.roster
+          .filter((p) => (this.scores[p.id] ?? 0) === top)
+          .map((p) => p.id);
         this.phase = 'gameover';
-        this.emit('game-end', { scores: { ...this.scores }, winnerId: winner });
+        this.emit('game-end', { scores: { ...this.scores }, winnerIds });
       } else if (isLastInRound) {
         const round = Math.floor(this.qIndex / QUESTIONS_PER_ROUND) + 1;
         this.emit('round-end', { round, scores: { ...this.scores } });
@@ -316,7 +371,7 @@ export class Game {
   _hostOnBuy(playerId, { qKey, type }) {
     const hq = this.hq;
     const def = POWERUPS[type];
-    if (!def || !hq || hq.resolved || hq.qKey !== qKey) return;
+    if (!def || !hq || hq.resolved || hq.qKey !== qKey || !hq.active.has(playerId)) return;
     if (this.phase !== 'answering' && this.phase !== 'countdown') return;
     if (hq.lockedOut.has(playerId) || hq.answers.has(playerId)) return;
     if (type === 'timewarp' && !(this.settings.timer > 0)) return;
@@ -343,7 +398,7 @@ export class Game {
     this._after(400, () => this._nextQuestion());
   }
 
-  // ---------------- player actions (both roles) ----------------
+  // ---------------- player actions (all roles) ----------------
   answer(idx) {
     if (this.phase !== 'answering' || this.myAnswered || this.myLockedOut) return;
     if (performance.now() < this.frozenUntil) return;
@@ -391,26 +446,29 @@ export class Game {
     switch (type) {
       case 'lobby-state': {
         if (this.isHost) return;
-        // Guest: adopt host's settings; detect "room full".
+        // Guest: adopt host's settings + roster; detect "room full".
         const meIn = data.players.some((p) => p.id === this.me.id);
         if (!meIn) {
-          this.ui('room-full', { inGame: data.inGame });
+          if (this.phase === 'lobby') this.ui('room-full', { inGame: data.inGame });
           return;
         }
+        // Seated players ignore lobby broadcasts mid-game (the host may
+        // re-send lobby-state to turn away late joiners).
+        if (this.phase !== 'lobby') return;
         this.settings = data.settings;
-        const host = data.players.find((p) => p.role === 'host');
-        if (host) this.opponent = { id: host.id, name: host.name };
+        this.roster = data.players;
         this.ui('lobby-update', this.lobbyView());
         return;
       }
 
       case 'start-game': {
         this.settings = data.settings;
+        this.roster = data.roster;
         this.scores = { ...data.scores };
         this.myShield = false;
         this.myDouble = false;
         this.phase = 'countdown';
-        this.ui('game-start', { settings: this.settings, scores: this.scores });
+        this.ui('game-start', { settings: this.settings, roster: this.roster, scores: this.scores });
         return;
       }
 
@@ -466,6 +524,7 @@ export class Game {
           if (data.type === 'double') this.myDouble = true;
           if (data.type === 'timewarp') this.myDeadlineExtra += TIMEWARP_MS;
         } else if (data.type === 'freeze') {
+          // Freeze hits every player except the buyer.
           this.frozenUntil = performance.now() + FREEZE_MS;
         }
         this.ui('powerup', data);
@@ -503,7 +562,7 @@ export class Game {
         this.ui('rematch-vote', { from });
         if (this.isHost) {
           this.rematchVotes.add(from);
-          if (this.rematchVotes.size >= 2) {
+          if (this.rematchVotes.size >= this.roster.length) {
             this.rematchVotes.clear();
             this.start();
           }
@@ -511,10 +570,31 @@ export class Game {
         return;
       }
 
-      case 'quit': {
-        if (from !== this.me.id) {
+      case 'player-left': {
+        if (from !== this.me.id && !this.isHost) {
+          this.roster = data.roster;
+        }
+        if (data.roster.length < 2) {
           this._clearHostTimers();
-          this.ui('opponent-left', { name: this.opponent ? this.opponent.name : 'opponent' });
+          this.ui('opponent-left', { name: data.name, fatal: true });
+        } else {
+          this.ui('player-left', { playerId: data.playerId, name: data.name });
+        }
+        return;
+      }
+
+      case 'quit': {
+        if (from === this.me.id) return;
+        if (this.isHost) {
+          this._hostRemovePlayer(from);
+        } else {
+          const host = this.roster[0];
+          if (host && from === host.id) {
+            // Host left: the room is dead for everyone.
+            this._clearHostTimers();
+            this.ui('opponent-left', { name: host.name, fatal: true });
+          }
+          // Another guest quitting is announced by the host via player-left.
         }
         return;
       }
