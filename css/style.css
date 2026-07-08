@@ -668,34 +668,30 @@ body {
   to { transform: translateY(110vh) rotate(720deg); }
 }
 
-/* ---------------- cursors ---------------- */
-.game-cursor {
-  position: fixed; left: 0; top: 0; z-index: 50;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.3s;
-  will-change: transform;
-}
-.game-cursor.visible { opacity: 1; }
-.cursor-body {
-  fill: var(--teal);
-  stroke: var(--ink); stroke-width: 3;
-  stroke-linejoin: round;
-}
-.game-cursor svg { animation: cursor-wobble 1.4s ease-in-out infinite; filter: drop-shadow(3px 3px 0 rgba(43, 27, 68, 0.55)); }
-@keyframes cursor-wobble {
-  0%, 100% { transform: rotate(0deg) scale(1); }
-  50%      { transform: rotate(-6deg) scale(1.06, 0.95); }
-}
-.cursor-tag {
-  position: absolute; left: 1.6rem; top: 1.9rem;
-  font-weight: 800; font-size: 0.68rem;
-  background: var(--teal); color: var(--cream);
-  border: 2px solid var(--ink); border-radius: 999px;
-  padding: 0.05em 0.55em;
+/* -------- opponent pick stamps (who chose which answer) -------- */
+.answer-btn { position: relative; }
+.answer-stamp {
+  position: absolute; top: 50%; right: 0.8rem;
+  font-family: var(--font-body);
+  font-weight: 800; font-size: clamp(0.8rem, 2.2vw, 1.05rem);
+  color: var(--cream);
+  border: 3px solid var(--ink); border-radius: 999px;
+  padding: 0.18em 0.85em;
   white-space: nowrap;
-  max-width: 9em; overflow: hidden; text-overflow: ellipsis;
+  max-width: 11em; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: 3px 3px 0 var(--ink);
+  animation: stamp-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+  z-index: 2;
 }
+.answer-stamp.wrong { background: var(--red); transform: translateY(-50%) rotate(4deg); }
+.answer-stamp.correct { background: var(--teal); transform: translateY(-50%) rotate(-4deg); }
+@keyframes stamp-in {
+  0% { transform: translateY(-50%) scale(0) rotate(-25deg); opacity: 0; }
+  60% { transform: translateY(-50%) scale(1.35, 0.8) rotate(8deg); opacity: 1; }
+}
+.answer-btn.them-wrong { animation: shake 0.45s; }
+.answer-btn.them-wrong .answer-key { background: var(--red); }
 
 /* ---------------- toasts & modal ---------------- */
 .toast-stack {

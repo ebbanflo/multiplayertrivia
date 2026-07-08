@@ -10,7 +10,8 @@ spend your points on dirty tricks.
 
 1. One player clicks **HOST GAME** and gets a room code (like `U2A1`).
 2. The other clicks **JOIN GAME** and types the code — works across phones,
-   laptops, whatever. You'll see each other's cursors live.
+   laptops, whatever. When your opponent answers, you'll see exactly which
+   option they picked, stamped live on your screen.
 3. The host picks the settings and hits **START BATTLE!**
 
 ### Rules — lock-out duel
@@ -64,9 +65,10 @@ The game is a fully static site — no build step, no server of your own.
   [The Trivia API](https://the-trivia-api.com) — deduplicated and mixed, with
   a bundled offline bank (`js/data/fallback-questions.js`) as backup, so the
   game works even when the APIs don't.
-- **Cursors**: pointer positions stream over the same channel (~16 msg/s,
-  eased on the receiving end) and are normalized to the question area so
-  phone and desktop players map onto each other's screens.
+- **Live opponent feedback**: the moment your opponent locks in an answer,
+  their pick is stamped on your screen — a red shake for a miss, a teal star
+  when they steal the question. Traffic is a handful of messages per
+  question, so the Supabase free tier lasts essentially forever.
 - **Audio**: all sound effects are synthesized with WebAudio — zero asset files.
 - **Fonts** (Titan One, Baloo 2) and the Supabase client are vendored, so the
   site is fully self-contained.

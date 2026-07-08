@@ -35,12 +35,9 @@ class BaseTransport {
 class SupabaseTransport extends BaseTransport {
   constructor(code, self) {
     super(code, self);
-    // Raise the client-side broadcast throttle (default 10 msg/s) so
-    // live cursor sharing isn't dropped; stays under the project's
-    // realtime rate limits with two players.
-    this.client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-      realtime: { params: { eventsPerSecond: 40 } },
-    });
+    // Game events are low-rate (a handful per question), so the default
+    // client-side broadcast throttle (10 msg/s) is plenty.
+    this.client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
     this.channel = null;
   }
 

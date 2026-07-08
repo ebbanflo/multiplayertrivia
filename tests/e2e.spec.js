@@ -114,18 +114,12 @@ test.describe('HMMM? two-player battle', () => {
     await expect(host.locator('#screen-game')).toBeVisible();
     await expect(guest.locator('#screen-game')).toBeVisible();
 
-    // ---- Q1: same question on both screens; cursor sharing; host wins ----
+    // ---- Q1: same question on both screens; host wins ----
     await waitForAnswering(host, '1-0');
     await waitForAnswering(guest, '1-0');
     const hostQ = await host.locator('#q-text').textContent();
     const guestQ = await guest.locator('#q-text').textContent();
     expect(hostQ).toBe(guestQ);
-
-    // cursors: host moves; guest sees the clay cursor appear
-    await host.mouse.move(400, 400);
-    await host.mouse.move(600, 500, { steps: 10 });
-    await expect(guest.locator('#cursor-them')).toHaveClass(/visible/, { timeout: 5000 });
-    await expect(guest.locator('#cursor-them-tag')).toHaveText('HOSTY');
 
     await clickAnswer(host, { correct: true });
     await waitForReveal(host);
@@ -133,6 +127,8 @@ test.describe('HMMM? two-player battle', () => {
     expect(hs.myScore).toBeGreaterThanOrEqual(100); // base + speed bonus
     const scoreAfterQ1 = hs.myScore;
     await expect(guest.locator('#verdict-banner')).toHaveText(/HOSTY GOT IT!/);
+    // guest sees the winner's stamp on the correct answer
+    await expect(guest.locator('.answer-stamp.correct')).toHaveText(/HOSTY/);
 
     // ---- Q2: guest answers wrong (-50 + lockout), host steals ----
     await waitForAnswering(host, '1-1');
@@ -144,6 +140,8 @@ test.describe('HMMM? two-player battle', () => {
     // guest is locked out: all answer buttons disabled
     const enabledCount = await guest.locator('.answer-btn:enabled').count();
     expect(enabledCount).toBe(0);
+    // host sees exactly which answer the guest whiffed on
+    await expect(host.locator('.answer-stamp.wrong')).toHaveText(/GUESTO/);
     await clickAnswer(host, { correct: true });
     await waitForReveal(host);
     hs = await engineState(host);

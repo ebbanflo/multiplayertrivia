@@ -3,7 +3,6 @@
 
 import { POWERUPS, FREEZE_MS, QUESTIONS_PER_ROUND } from './config.js';
 import { sfx } from './audio.js';
-import { CursorShare } from './cursors.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -69,7 +68,6 @@ function bumpScore(el, up) {
 export class GameUI {
   constructor(engine) {
     this.g = engine;
-    this.cursors = new CursorShare((pos) => this.g.sendCursor(pos));
     this.timerRaf = null;
     this.timerDuration = null;
     this.lastTickSecond = null;
@@ -176,7 +174,6 @@ export class GameUI {
       $('#hud-me-effects').innerHTML = '';
       $('#hud-them-effects').innerHTML = '';
       showScreen('screen-game');
-      this.cursors.start(g.opponent?.name);
       sfx.go();
     });
 
@@ -211,6 +208,9 @@ export class GameUI {
         this._setAnswersEnabled(false);
         if (data.shielded) this._refreshFxBadges();
       } else {
+        // Show exactly which answer the opponent whiffed on.
+        sfx.steal();
+        this._stampAnswer(data.idx, g.opponent?.name, 'wrong');
         toast(`${(g.opponent?.name || 'THEM').toUpperCase()} WHIFFED! ${data.shielded ? '(shielded)' : ''}`);
       }
       this._refreshShop();
@@ -257,7 +257,6 @@ export class GameUI {
 
     g.onUI('game-end', ({ scores, winnerId }) => {
       this._stopTimer();
-      this.cursors.stop();
       const won = winnerId === g.me.id;
       const tie = winnerId === null;
       $('#gameover-title').textContent = tie ? "IT'S A TIE?!" : (won ? 'YOU WIN!' : 'SQUASHED!');
@@ -272,11 +271,8 @@ export class GameUI {
       if (from !== g.me.id) toast(`${(g.opponent?.name || 'THEM').toUpperCase()} WANTS A REMATCH!`);
     });
 
-    g.onUI('cursor', (pos) => this.cursors.receive(pos));
-
     g.onUI('opponent-left', ({ name }) => {
       this._stopTimer();
-      this.cursors.stop();
       modal(`${(name || 'Your opponent').toUpperCase()} left the game!`).then(() => this._leave());
     });
   }
@@ -331,6 +327,7 @@ export class GameUI {
     $$('.answer-btn').forEach((btn, i) => {
       btn.className = 'answer-btn';
       btn.querySelector('.answer-text').textContent = q.answers[i] ?? '';
+      btn.querySelectorAll('.answer-stamp').forEach((s) => s.remove());
       btn.disabled = true;
     });
 
@@ -372,6 +369,18 @@ export class GameUI {
       btn.classList.add('zapped');
       btn.disabled = true;
     });
+  }
+
+  // Pin the opponent's name to the answer they chose, with a wobble-in
+  // animation — red-tinted shake for a miss, teal pop for a win.
+  _stampAnswer(idx, name, kind) {
+    const btn = $$('.answer-btn')[idx];
+    if (!btn || btn.querySelector('.answer-stamp')) return;
+    const stamp = document.createElement('span');
+    stamp.className = `answer-stamp ${kind}`;
+    stamp.textContent = `${kind === 'wrong' ? '✖' : '★'} ${(name || 'THEM').toUpperCase()}`;
+    btn.appendChild(stamp);
+    if (kind === 'wrong') btn.classList.add('them-wrong');
   }
 
   _showFreeze() {
@@ -416,6 +425,7 @@ export class GameUI {
       this._banner(data.doubled ? `✖️2 +${data.winDelta}!!` : `+${data.winDelta}!`, 'good');
     } else if (data.winnerId) {
       sfx.steal();
+      this._stampAnswer(data.correctIndex, this.g.opponent?.name, 'correct');
       this._banner(`${(this.g.opponent?.name || 'THEM').toUpperCase()} GOT IT!`, 'bad');
     } else {
       sfx.womp();

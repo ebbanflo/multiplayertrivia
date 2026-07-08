@@ -67,7 +67,7 @@ export class Game {
     const types = [
       'lobby-state', 'start-game', 'question', 'answer', 'timeup', 'buy',
       'powerup-applied', 'verdict', 'q-end', 'round-end', 'next-round',
-      'game-end', 'rematch-vote', 'cursor', 'quit',
+      'game-end', 'rematch-vote', 'quit',
     ];
     for (const type of types) {
       this.t.on(type, ({ from, data }) => this._handle(type, from, data));
@@ -376,8 +376,6 @@ export class Game {
     else this.t.send('buy', payload);
   }
 
-  sendCursor(pos) { this.t.send('cursor', pos); }
-
   voteRematch() {
     if (this.phase !== 'gameover') return;
     this.emit('rematch-vote', {});
@@ -510,11 +508,6 @@ export class Game {
             this.start();
           }
         }
-        return;
-      }
-
-      case 'cursor': {
-        if (from !== this.me.id) this.ui('cursor', data);
         return;
       }
 
