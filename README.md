@@ -30,7 +30,8 @@ spend your points on dirty tricks.
 An endless, elimination-based alternative to the classic match:
 
 - Everyone starts with **1000 points**; every question, each survivor
-  **antes 25 into a pot** and the question winner **takes the pot**
+  **antes into a pot** — 25, 50 or 100, the host's choice, which sets how
+  fast the game burns — and the question winner **takes the pot**
   (nobody right? it rolls over and grows). Wrong answers still cost 50.
 - **Hit 0 and you're eliminated** — you stay and spectate. The **last
   player standing wins**. Hiding just bleeds you out through the antes.
@@ -47,6 +48,7 @@ An endless, elimination-based alternative to the classic match:
 | Mode | Classic · **Royale ∞** |
 | Difficulty (classic) | Easy · Medium · Hard · **Ramp Up!** (easy → hard across the game) |
 | Ramp dial (royale) | 1 static · 2 slow · 3 ramp · 4 wobbly · 5 chaos |
+| Ante (royale) | 25 · 50 · 100 per question |
 | Timer | 30 sec · 1 min · No timer (classic only — Royale needs a clock) |
 | Rounds (classic) | 1 · 2 · 3 · 5 (10 questions each) |
 

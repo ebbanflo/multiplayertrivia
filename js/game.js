@@ -29,7 +29,7 @@ export class Game {
     this.hostPresent = this.isHost;
     this.settings = {
       mode: 'classic', difficulty: 'medium', timer: 60, rounds: 1,
-      ramp: 3, staticDiff: 'medium',
+      ramp: 3, staticDiff: 'medium', ante: ROYALE_ANTE,
     };
     this.phase = 'lobby';            // lobby|countdown|answering|reveal|intermission|gameover
     this.scores = {};                // playerId -> score
@@ -287,9 +287,11 @@ export class Game {
 
     // Ante phase: every surviving player pays into the pot. Running dry
     // on the ante alone is a legitimate (slow, ignoble) way to go out.
+    // The host-chosen ante size (25/50/100) sets the pace of doom.
+    const ante = this.settings.ante || ROYALE_ANTE;
     const anteEliminated = [];
     for (const id of this.alive) {
-      const paid = Math.min(ROYALE_ANTE, this.scores[id]);
+      const paid = Math.min(ante, this.scores[id]);
       this.scores[id] -= paid;
       this.pot += paid;
       if (this.scores[id] <= 0) {

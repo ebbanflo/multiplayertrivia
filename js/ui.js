@@ -386,6 +386,7 @@ export class GameUI {
       rounds: !royale,
       ramp: royale,
       staticDiff: royale && v.settings.ramp === 1,
+      ante: royale,
       timer: true,
     };
     $$('#settings-panel .setting-group').forEach((group) => {

@@ -428,28 +428,32 @@ test.describe('HMMM? two-player battle', () => {
     await expect(host.locator('#final-board .score-card')).toHaveCount(3);
   });
 
-  test('royale: the pot rolls over when everyone whiffs', async ({ context }) => {
+  test('royale: host-set ante drives the pot; rollover when everyone whiffs', async ({ context }) => {
     await stubApis(context);
     const { host, guest } = await setupMatch(context, { timer: '30' });
     await host.click('[data-setting="mode"] .chip[data-value="royale"]');
+    // ante picker appears in royale; crank it to 100
+    await expect(host.locator('[data-group="ante"]')).toBeVisible();
+    await host.click('[data-setting="ante"] .chip[data-value="100"]');
+    await expect(guest.locator('[data-setting="ante"] .chip[data-value="100"]')).toHaveClass(/selected/);
     await host.click('#btn-start');
 
     await waitForAnswering(host, 'r-0');
     await waitForAnswering(guest, 'r-0');
-    expect((await engineState(host)).pot).toBe(50);
+    expect((await engineState(host)).pot).toBe(200); // 100 x 2 players
     await clickAnswer(host, { correct: false });
     await clickAnswer(guest, { correct: false });
     await waitForReveal(host);
-    await expect(host.locator('#verdict-banner')).toHaveText(/POT ROLLS OVER! 💰50/);
+    await expect(host.locator('#verdict-banner')).toHaveText(/POT ROLLS OVER! 💰200/);
 
     // next question: rolled pot + fresh antes
     await waitForAnswering(host, 'r-1');
-    expect((await engineState(host)).pot).toBe(100);
-    await expect(host.locator('#hud-round')).toHaveText(/Q2 · 💰100/);
+    expect((await engineState(host)).pot).toBe(400);
+    await expect(host.locator('#hud-round')).toHaveText(/Q2 · 💰400/);
     await clickAnswer(host, { correct: true });
     await waitForReveal(host);
-    // two antes (-50), one wrong answer (-50), one fat pot (+100): net even
-    expect((await engineState(host)).myScore).toBe(1000);
+    // two antes (-200), one wrong answer (-50), one giant pot (+400)
+    expect((await engineState(host)).myScore).toBe(1150);
   });
 
   test('four-player battle: multi-stamps, freeze-all, dropout, fifth rejected', async ({ context }) => {
