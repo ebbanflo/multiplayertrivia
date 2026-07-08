@@ -161,10 +161,14 @@ test.describe('HMMM? two-player battle', () => {
     await waitForAnswering(guest, '1-3');
     await host.click('.powerup-btn[data-type="freeze"]');
     await expect(guest.locator('#freeze-overlay')).toHaveClass(/show/);
-    // frozen guest clicks are ignored by the engine
-    await clickAnswer(guest, { correct: true });
-    const gsFrozen = await engineState(guest);
-    expect(gsFrozen.phase).toBe('answering'); // nothing happened
+    // Frozen guest input is ignored by the engine. (Probe directly —
+    // a DOM click would be deferred by Playwright's auto-waiting until
+    // the freeze overlay clears, and then land as a real answer.)
+    await guest.evaluate(() => {
+      const e = window.__HMMM.engine;
+      e.answer(e.currentQ.q.correctIndex);
+    });
+    expect(await guest.evaluate(() => window.__HMMM.engine.myAnswered)).toBe(false);
     await clickAnswer(host, { correct: true });
     await waitForReveal(host);
 
