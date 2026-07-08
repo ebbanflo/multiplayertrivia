@@ -114,8 +114,9 @@ export class GameUI {
         sfx.click();
         const key = group.dataset.setting;
         const raw = chip.dataset.value;
-        const value = key === 'difficulty' ? raw : parseInt(raw, 10);
-        this.g.updateSetting(key === 'timer' ? 'timer' : key, value);
+        const stringKeys = ['difficulty', 'mode', 'staticDiff'];
+        const value = stringKeys.includes(key) ? raw : parseInt(raw, 10);
+        this.g.updateSetting(key, value);
       });
     });
 
@@ -216,6 +217,7 @@ export class GameUI {
       meAvatar.className = `clay-avatar small pcolor-${g.playerSlot(g.me.id)}`;
       this._renderOthersHud();
       this._setScores();
+      this._renderDeadMarks();
       $('#hud-me-effects').innerHTML = '';
       showScreen('screen-game');
       acquireWakeLock();
@@ -226,10 +228,26 @@ export class GameUI {
 
     g.onUI('answers-unlocked', ({ duration }) => {
       $('#countdown-overlay').classList.remove('show');
-      this._setAnswersEnabled(true);
+      if (!g.eliminated.has(g.me.id)) this._setAnswersEnabled(true);
       this._refreshShop();
       this._startTimer(duration);
       sfx.go();
+    });
+
+    // Royale: the pre-question ante — pot swells, stacks shrink, and the
+    // slow bleed can finish someone off before the question even shows.
+    g.onUI('ante', ({ eliminated }) => {
+      this._setScores();
+      this._renderDeadMarks();
+      for (const id of eliminated) {
+        if (id === g.me.id) {
+          sfx.womp();
+          this._banner('💀 YOU\'RE OUT!', 'bad');
+          toast('Your stack ran dry — spectating from the clay beyond.');
+        } else {
+          toast(`💀 ${g.playerName(id).toUpperCase()} IS OUT!`);
+        }
+      }
     });
 
     g.onUI('me-submitted', ({ idx }) => {
@@ -307,7 +325,9 @@ export class GameUI {
       releaseWakeLock();
       const won = winnerIds.includes(g.me.id);
       const tie = winnerIds.length > 1;
-      $('#gameover-title').textContent = tie ? "IT'S A TIE?!" : (won ? 'YOU WIN!' : 'SQUASHED!');
+      const royale = g.settings.mode === 'royale';
+      $('#gameover-title').textContent = tie ? "IT'S A TIE?!"
+        : (won ? (royale ? 'LAST ONE STANDING!' : 'YOU WIN!') : 'SQUASHED!');
       this._renderBoard($('#final-board'), scores, winnerIds);
       $('#btn-rematch').disabled = false;
       $('#gameover-status').textContent = tie
@@ -359,6 +379,22 @@ export class GameUI {
     }
 
     $('#settings-panel').classList.toggle('readonly', v.me.role !== 'host');
+    const royale = v.settings.mode === 'royale';
+    const groupVisible = {
+      mode: true,
+      difficulty: !royale,
+      rounds: !royale,
+      ramp: royale,
+      staticDiff: royale && v.settings.ramp === 1,
+      timer: true,
+    };
+    $$('#settings-panel .setting-group').forEach((group) => {
+      group.hidden = !groupVisible[group.dataset.group];
+    });
+    // Royale needs a clock — hide the NO TIMER chip there.
+    const noTimerChip = $('[data-setting="timer"] .chip[data-value="0"]');
+    if (noTimerChip) noTimerChip.hidden = royale;
+
     $$('#settings-panel .setting-options').forEach((group) => {
       const key = group.dataset.setting;
       const current = String(v.settings[key]);
@@ -400,10 +436,12 @@ export class GameUI {
   }
 
   // ---------- question flow ----------
-  _renderQuestion({ qKey, round, qIndex, totalRounds, q, duration }) {
+  _renderQuestion({ qKey, round, qIndex, totalRounds, q, duration, mode, qNum, pot }) {
     this._stopTimer();
     $('#verdict-banner').className = 'verdict-banner';
-    $('#hud-round').textContent = `R${round}/${totalRounds} · Q${qIndex + 1}/${QUESTIONS_PER_ROUND}`;
+    $('#hud-round').textContent = mode === 'royale'
+      ? `ROYALE ∞ · Q${qNum} · 💰${pot}`
+      : `R${round}/${totalRounds} · Q${qIndex + 1}/${QUESTIONS_PER_ROUND}`;
     $('#q-category').textContent = q.category;
     const diffEl = $('#q-difficulty');
     diffEl.textContent = q.difficulty.toUpperCase();
@@ -520,17 +558,47 @@ export class GameUI {
 
     this._setScores(data.winnerId && data.winDelta ? { [data.winnerId]: data.winDelta } : null);
     this._refreshFxBadges();
+    const royale = this.g.settings.mode === 'royale';
 
     if (data.winnerId === this.g.me.id) {
       sfx.correct();
-      this._banner(data.doubled ? `✖️2 +${data.winDelta}!!` : `+${data.winDelta}!`, 'good');
+      const label = royale ? `💰 +${data.winDelta} POT!` : `+${data.winDelta}!`;
+      this._banner(data.doubled ? `✖️2 ${label}!` : label, 'good');
     } else if (data.winnerId) {
       sfx.steal();
       this._stampAnswer(data.correctIndex, data.winnerId, 'correct');
-      this._banner(`${this.g.playerName(data.winnerId).toUpperCase()} GOT IT!`, 'bad');
+      const name = this.g.playerName(data.winnerId).toUpperCase();
+      this._banner(royale ? `${name} TAKES THE POT!` : `${name} GOT IT!`, 'bad');
+    } else if (royale) {
+      sfx.womp();
+      this._banner(`POT ROLLS OVER! 💰${data.pot}`, 'info');
     } else {
       sfx.womp();
       this._banner(data.reason === 'timeout' ? "TIME'S UP!" : 'NOBODY GOT IT!', 'info');
+    }
+
+    for (const id of data.eliminated || []) {
+      if (id === this.g.me.id) {
+        sfx.womp();
+        toast('💀 You\'re out! Spectating from the clay beyond.');
+      } else {
+        toast(`💀 ${this.g.playerName(id).toUpperCase()} IS OUT!`);
+      }
+    }
+    this._renderDeadMarks();
+  }
+
+  // Skull-out eliminated players' HUD cards (Royale).
+  _renderDeadMarks() {
+    const g = this.g;
+    const mark = (el, dead) => {
+      el.classList.toggle('dead', dead);
+      const face = el.querySelector('.avatar-face');
+      if (face) face.textContent = dead ? 'x_x' : '·‿·';
+    };
+    mark($('#hud-me'), g.eliminated.has(g.me.id));
+    for (const chip of $$('#hud-others .hud-mini')) {
+      mark(chip, g.eliminated.has(chip.dataset.pid));
     }
   }
 
@@ -639,7 +707,8 @@ export class GameUI {
       btn.disabled = used || stacked || timerless
         || myScore < def.cost
         || g.phase !== 'answering'
-        || g.myAnswered || g.myLockedOut;
+        || g.myAnswered || g.myLockedOut
+        || g.eliminated.has(g.me.id);
     });
   }
 

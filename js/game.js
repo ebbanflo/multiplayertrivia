@@ -14,8 +14,9 @@ import {
   QUESTIONS_PER_ROUND, COUNTDOWN_MS, REVEAL_MS, RESOLVE_GRACE_MS,
   SCORE_BASE, SCORE_SPEED_MAX, SCORE_WRONG,
   POWERUPS, FREEZE_MS, TIMEWARP_MS, MAX_PLAYERS,
+  ROYALE_START, ROYALE_ANTE,
 } from './config.js';
-import { buildQuestionSet } from './questions.js';
+import { buildQuestionSet, fetchDifficulty, royaleDifficulty } from './questions.js';
 
 export class Game {
   constructor(transport, self) {
@@ -26,7 +27,10 @@ export class Game {
     // order) and shared with everyone — it drives player colors.
     this.roster = this.isHost ? [{ ...self }] : [];
     this.hostPresent = this.isHost;
-    this.settings = { difficulty: 'medium', timer: 60, rounds: 1 };
+    this.settings = {
+      mode: 'classic', difficulty: 'medium', timer: 60, rounds: 1,
+      ramp: 3, staticDiff: 'medium',
+    };
     this.phase = 'lobby';            // lobby|countdown|answering|reveal|intermission|gameover
     this.scores = {};                // playerId -> score
     this.uiHandlers = new Map();
@@ -42,6 +46,10 @@ export class Game {
     this.myShield = false;           // mirrored badges (host holds the truth)
     this.myDouble = false;
 
+    // Royale mode client state (mirrored from host events)
+    this.pot = 0;
+    this.eliminated = new Set();     // playerIds knocked out this game
+
     // Host-only state
     this.questions = [];
     this.qIndex = -1;
@@ -50,6 +58,8 @@ export class Game {
     this.fx = {};                    // playerId -> { shield, double }
     this.rematchVotes = new Set();
     this.hostTimers = [];
+    this.alive = new Set();          // royale: players still standing
+    this.qPool = null;               // royale: { easy: [], medium: [], hard: [] }
 
     this._wire();
   }
@@ -159,12 +169,22 @@ export class Game {
       return;
     }
     // Mid-game: everyone learns; the match continues if 2+ remain.
+    this.alive.delete(id);
     this.emit('player-left', { playerId: id, name, roster: this.roster });
     if (this.roster.length < 2) {
       this._clearHostTimers();
-    } else if (this.hq && !this.hq.resolved) {
+      return;
+    }
+    if (this.hq && !this.hq.resolved) {
       this.hq.active.delete(id);
       this._maybeResolve();
+    }
+    // Royale: a quitter can leave one player standing — that's a win.
+    if (this.settings.mode === 'royale' && this.phase !== 'gameover'
+        && this.phase !== 'lobby' && this.alive.size <= 1
+        && (!this.hq || this.hq.resolved)) {
+      this._clearHostTimers();
+      this._royaleGameEnd();
     }
   }
 
@@ -192,6 +212,10 @@ export class Game {
   updateSetting(key, value) {
     if (!this.isHost || this.phase !== 'lobby') return;
     this.settings[key] = value;
+    // Royale requires a clock — a no-timer standoff would never resolve.
+    if (this.settings.mode === 'royale' && !(this.settings.timer > 0)) {
+      this.settings.timer = 60;
+    }
     this._broadcastLobby();
     this.ui('lobby-update', this.lobbyView());
   }
@@ -199,24 +223,36 @@ export class Game {
   // ---------------- host: game flow ----------------
   async start() {
     if (!this.isHost || this.roster.length < 2) return;
+    const royale = this.settings.mode === 'royale';
     this.ui('loading', { on: true });
     try {
-      this.questions = await buildQuestionSet(
-        this.settings.difficulty, this.settings.rounds, this.usedTexts,
-      );
+      if (royale) {
+        // Endless mode: pre-warm the pool for the opening difficulty;
+        // later batches are fetched as the game runs.
+        this.qPool = { easy: [], medium: [], hard: [] };
+        const first = royaleDifficulty(0, this.settings.ramp, this.settings.staticDiff);
+        this.qPool[first] = await fetchDifficulty(10, first, this.usedTexts);
+        for (const q of this.qPool[first]) this.usedTexts.add(q.text);
+      } else {
+        this.questions = await buildQuestionSet(
+          this.settings.difficulty, this.settings.rounds, this.usedTexts,
+        );
+      }
     } finally {
       this.ui('loading', { on: false });
     }
     this.qIndex = -1;
     this.scores = {};
     this.fx = {};
+    this.pot = 0;
+    this.alive = new Set(this.roster.map((p) => p.id));
     for (const p of this.roster) {
-      this.scores[p.id] = 0;
+      this.scores[p.id] = royale ? ROYALE_START : 0;
       this.fx[p.id] = {};
     }
     this.rematchVotes.clear();
     this.emit('start-game', { settings: this.settings, roster: this.roster, scores: this.scores });
-    this._after(600, () => this._nextQuestion());
+    this._after(600, () => (royale ? this._royaleNextQuestion() : this._nextQuestion()));
   }
 
   _nextQuestion() {
@@ -243,6 +279,79 @@ export class Game {
       q,
       duration: this.settings.timer > 0 ? this.settings.timer * 1000 : null,
     });
+  }
+
+  // ---------------- host: royale flow ----------------
+  async _royaleNextQuestion() {
+    this.qIndex += 1;
+
+    // Ante phase: every surviving player pays into the pot. Running dry
+    // on the ante alone is a legitimate (slow, ignoble) way to go out.
+    const anteEliminated = [];
+    for (const id of this.alive) {
+      const paid = Math.min(ROYALE_ANTE, this.scores[id]);
+      this.scores[id] -= paid;
+      this.pot += paid;
+      if (this.scores[id] <= 0) {
+        this.scores[id] = 0;
+        anteEliminated.push(id);
+      }
+    }
+    for (const id of anteEliminated) this.alive.delete(id);
+    this.emit('royale-ante', {
+      scores: { ...this.scores }, pot: this.pot, eliminated: anteEliminated,
+    });
+    if (this.alive.size <= 1) { this._royaleGameEnd(); return; }
+
+    // Draw a question at the ramp dial's difficulty, refilling the pool
+    // from the APIs as needed (reveal pauses hide the fetch time).
+    const diff = royaleDifficulty(this.qIndex, this.settings.ramp, this.settings.staticDiff);
+    if (!this.qPool[diff].length) {
+      const batch = await fetchDifficulty(10, diff, this.usedTexts);
+      for (const q of batch) this.usedTexts.add(q.text);
+      this.qPool[diff].push(...batch);
+    } else if (this.qPool[diff].length < 3) {
+      fetchDifficulty(10, diff, this.usedTexts).then((batch) => {
+        for (const q of batch) this.usedTexts.add(q.text);
+        this.qPool[diff].push(...batch);
+      }).catch(() => { /* next draw retries synchronously */ });
+    }
+    const q = this.qPool[diff].shift();
+
+    const qKey = `r-${this.qIndex}`;
+    this.hq = {
+      qKey,
+      q,
+      active: new Set(this.alive),
+      answers: new Map(),
+      lockedOut: new Set(),
+      timeups: new Set(),
+      resolved: false,
+      candidates: [],
+      graceTimer: null,
+    };
+    this.emit('question', {
+      qKey,
+      mode: 'royale',
+      qNum: this.qIndex + 1,
+      pot: this.pot,
+      q,
+      duration: this.settings.timer * 1000,
+    });
+  }
+
+  _royaleGameEnd() {
+    // Last one standing wins; if the final players fell together, the
+    // biggest stack among the just-fallen takes it.
+    let winnerIds;
+    if (this.alive.size >= 1) {
+      winnerIds = [...this.alive];
+    } else {
+      const top = Math.max(...this.roster.map((p) => this.scores[p.id] ?? 0));
+      winnerIds = this.roster.filter((p) => (this.scores[p.id] ?? 0) === top).map((p) => p.id);
+    }
+    this.phase = 'gameover';
+    this.emit('game-end', { scores: { ...this.scores }, winnerIds });
   }
 
   _speedBonus(elapsedMs, durationMs) {
@@ -291,6 +400,9 @@ export class Game {
       let shielded = false;
       if (fx.shield) { delta = 0; shielded = true; fx.shield = false; }
       this.scores[playerId] += delta;
+      if (this.settings.mode === 'royale' && this.scores[playerId] < 0) {
+        this.scores[playerId] = 0;
+      }
       this.emit('verdict', {
         qKey, playerId, idx, correct: false, shielded, delta, scores: { ...this.scores },
       });
@@ -323,6 +435,7 @@ export class Game {
     if (!hq || hq.resolved) return;
     hq.resolved = true;
     if (hq.graceTimer) clearTimeout(hq.graceTimer);
+    const royale = this.settings.mode === 'royale';
 
     let winnerId = null;
     let winDelta = 0;
@@ -331,15 +444,33 @@ export class Game {
       hq.candidates.sort((a, b) => a.elapsed - b.elapsed);
       const w = hq.candidates[0];
       winnerId = w.playerId;
-      const duration = this.settings.timer > 0 ? this.settings.timer * 1000 : null;
-      winDelta = SCORE_BASE + this._speedBonus(w.elapsed, duration);
       const fx = this.fx[winnerId] || {};
+      if (royale) {
+        // Winner takes the pot (Double Down doubles the haul).
+        winDelta = this.pot;
+        this.pot = 0;
+      } else {
+        const duration = this.settings.timer > 0 ? this.settings.timer * 1000 : null;
+        winDelta = SCORE_BASE + this._speedBonus(w.elapsed, duration);
+      }
       if (fx.double) { winDelta *= 2; doubled = true; fx.double = false; }
       this.scores[winnerId] += winDelta;
     }
 
+    // Royale: wrong-answer penalties may have finished someone off.
+    const eliminated = [];
+    if (royale) {
+      for (const id of this.alive) {
+        if (this.scores[id] <= 0) {
+          this.scores[id] = 0;
+          eliminated.push(id);
+        }
+      }
+      for (const id of eliminated) this.alive.delete(id);
+    }
+
     const isLastInRound = (this.qIndex % QUESTIONS_PER_ROUND) === QUESTIONS_PER_ROUND - 1;
-    const isLastQuestion = this.qIndex === this.questions.length - 1;
+    const isLastQuestion = !royale && this.qIndex === this.questions.length - 1;
 
     this.emit('q-end', {
       qKey: hq.qKey,
@@ -348,11 +479,16 @@ export class Game {
       winDelta,
       doubled,
       reason,
+      pot: this.pot,
+      eliminated,
       scores: { ...this.scores },
     });
 
     this._after(REVEAL_MS, () => {
-      if (isLastQuestion) {
+      if (royale) {
+        if (this.alive.size <= 1) this._royaleGameEnd();
+        else this._royaleNextQuestion();
+      } else if (isLastQuestion) {
         const top = Math.max(...this.roster.map((p) => this.scores[p.id] ?? 0));
         const winnerIds = this.roster
           .filter((p) => (this.scores[p.id] ?? 0) === top)
@@ -400,6 +536,7 @@ export class Game {
 
   // ---------------- player actions (all roles) ----------------
   answer(idx) {
+    if (this.eliminated.has(this.me.id)) return; // spectators watch, only
     if (this.phase !== 'answering' || this.myAnswered || this.myLockedOut) return;
     if (performance.now() < this.frozenUntil) return;
     this.myAnswered = true;
@@ -411,6 +548,7 @@ export class Game {
   }
 
   timeup() {
+    if (this.eliminated.has(this.me.id)) return;
     if (this.phase !== 'answering' || this.myAnswered || this.myLockedOut) return;
     this.myLockedOut = true;
     const payload = { qKey: this.currentQ.qKey };
@@ -420,6 +558,7 @@ export class Game {
   }
 
   buy(type) {
+    if (this.eliminated.has(this.me.id)) return;
     if (this.phase !== 'answering') return;
     if (this.myAnswered || this.myLockedOut) return;
     if (performance.now() < this.frozenUntil) return;
@@ -467,13 +606,24 @@ export class Game {
         this.scores = { ...data.scores };
         this.myShield = false;
         this.myDouble = false;
+        this.pot = 0;
+        this.eliminated = new Set();
         this.phase = 'countdown';
         this.ui('game-start', { settings: this.settings, roster: this.roster, scores: this.scores });
         return;
       }
 
+      case 'royale-ante': {
+        this.scores = { ...data.scores };
+        this.pot = data.pot;
+        for (const id of data.eliminated) this.eliminated.add(id);
+        this.ui('ante', data);
+        return;
+      }
+
       case 'question': {
         this.currentQ = data;
+        if (data.pot !== undefined) this.pot = data.pot;
         this.phase = 'countdown';
         this.myAnswered = false;
         this.myLockedOut = false;
@@ -534,6 +684,8 @@ export class Game {
       case 'q-end': {
         this.scores = { ...data.scores };
         this.phase = 'reveal';
+        if (data.pot !== undefined) this.pot = data.pot;
+        for (const id of data.eliminated || []) this.eliminated.add(id);
         if (data.winnerId === this.me.id && data.doubled) this.myDouble = false;
         this.ui('q-end', data);
         return;

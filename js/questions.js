@@ -97,7 +97,8 @@ function fromFallback(count, difficulty, exclude) {
 
 // Fetch `count` questions of one difficulty, drawing from both APIs at
 // once and topping up from whichever succeeded / the offline bank.
-async function fetchDifficulty(count, difficulty, exclude) {
+// Exported for Royale mode's endless batch refills.
+export async function fetchDifficulty(count, difficulty, exclude) {
   const half = Math.ceil(count / 2);
   const settled = await Promise.allSettled([
     fetchOpenTDB(half, difficulty),
@@ -120,6 +121,26 @@ async function fetchDifficulty(count, difficulty, exclude) {
     pool = pool.concat(fromFallback(count - pool.length, difficulty, exclude));
   }
   return pool.slice(0, count);
+}
+
+// Royale ramp dial: difficulty for the i-th question (0-indexed) of an
+// endless game.
+//   1 STATIC — always the host's chosen difficulty
+//   2 SLOW   — easy, medium from Q8, hard from Q20
+//   3 RAMP   — easy, medium from Q5, hard from Q12
+//   4 WOBBLY — ramps like 3, but ~40% of questions go rogue
+//   5 CHAOS  — every question is a random difficulty
+export function royaleDifficulty(i, ramp, staticDiff) {
+  const DIFFS = ['easy', 'medium', 'hard'];
+  const roll = () => DIFFS[Math.floor(Math.random() * DIFFS.length)];
+  const curve = (mediumAt, hardAt) => (i < mediumAt ? 'easy' : i < hardAt ? 'medium' : 'hard');
+  switch (ramp) {
+    case 1: return staticDiff;
+    case 2: return curve(7, 19);
+    case 4: return Math.random() < 0.4 ? roll() : curve(4, 11);
+    case 5: return roll();
+    default: return curve(4, 11); // 3 — normal ramp
+  }
 }
 
 // difficulty mode: 'easy' | 'medium' | 'hard' | 'increasing'

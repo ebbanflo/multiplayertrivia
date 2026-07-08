@@ -46,6 +46,7 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html, body { height: 100%; }
 
@@ -392,6 +393,13 @@ body {
 }
 .hud-mini .hud-name { font-size: clamp(0.55rem, 1.6vw, 0.8rem); max-width: 5.5em; }
 .hud-mini .hud-score { font-size: clamp(0.85rem, 2.4vw, 1.3rem); }
+
+/* Royale: eliminated players go grey and stay to spectate */
+.hud-player.dead, .hud-mini.dead {
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+.hud-player.dead .clay-avatar, .hud-mini.dead .clay-avatar { animation: none; }
 
 .hud-center { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; flex: 1; min-width: 0; }
 .hud-round {

@@ -20,6 +20,14 @@ export const CODE_LENGTH = 4;
 
 export const MAX_PLAYERS = 4;
 export const QUESTIONS_PER_ROUND = 10;
+
+// Royale mode: endless elimination. Everyone starts with a stack, antes
+// into a pot every question, and the question winner takes the pot.
+// Hit 0 and you're out — last one standing wins.
+// (?rstart=N with debug lets tests start with a small stack.)
+const rstart = params.get('rstart');
+export const ROYALE_START = (DEBUG && rstart) ? parseInt(rstart, 10) : 1000;
+export const ROYALE_ANTE = 25;
 export const COUNTDOWN_MS = 3000;      // 3..2..1 lead-in before answers unlock
 export const REVEAL_MS = 3200;         // pause on the answer reveal
 export const RESOLVE_GRACE_MS = 350;   // wait for a competing answer before declaring a winner

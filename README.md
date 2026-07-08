@@ -25,13 +25,30 @@ spend your points on dirty tricks.
   strategy of its own.
 - Most points at the end of the final round wins.
 
+### Royale mode 👑
+
+An endless, elimination-based alternative to the classic match:
+
+- Everyone starts with **1000 points**; every question, each survivor
+  **antes 25 into a pot** and the question winner **takes the pot**
+  (nobody right? it rolls over and grows). Wrong answers still cost 50.
+- **Hit 0 and you're eliminated** — you stay and spectate. The **last
+  player standing wins**. Hiding just bleeds you out through the antes.
+- The **ramp dial (1-5)** sets the difficulty arc: 1 stays on one fixed
+  difficulty of your choice, 2 ramps slowly, 3 is the normal ramp,
+  4 ramps but ~40% of questions go rogue, 5 is pure chaos.
+- Power-ups all work — costs come out of your survival stack, and
+  Double Down doubles the pot you take.
+
 ### Settings (chosen by the host)
 
 | Setting | Options |
 |---|---|
-| Difficulty | Easy · Medium · Hard · **Ramp Up!** (easy → hard across the game) |
-| Timer | 30 sec · 1 min · No timer (per question) |
-| Rounds | 1 · 2 · 3 · 5 (10 questions each) |
+| Mode | Classic · **Royale ∞** |
+| Difficulty (classic) | Easy · Medium · Hard · **Ramp Up!** (easy → hard across the game) |
+| Ramp dial (royale) | 1 static · 2 slow · 3 ramp · 4 wobbly · 5 chaos |
+| Timer | 30 sec · 1 min · No timer (classic only — Royale needs a clock) |
+| Rounds (classic) | 1 · 2 · 3 · 5 (10 questions each) |
 
 ### Power-ups 🛒
 
