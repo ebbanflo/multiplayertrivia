@@ -224,7 +224,8 @@ body {
 .btn-purple { background: var(--purple); color: var(--cream); }
 .btn-lime   { background: var(--lime); }
 
-.mute-btn { position: fixed; bottom: 0.9rem; right: 0.9rem; z-index: 60; }
+/* sound toggle lives on the title screen only — decide before you battle */
+.mute-btn { position: absolute; bottom: 1rem; right: 1rem; z-index: 5; }
 
 /* ---------------- join code ---------------- */
 .code-inputs { display: flex; gap: clamp(0.4rem, 2vw, 1rem); }
@@ -603,11 +604,13 @@ body {
   letter-spacing: 0.06em;
 }
 .shop-items { display: flex; flex-direction: column; gap: 0.5rem; }
-.btn-quit {
+.shop-actions {
   margin-top: auto;
-  background: var(--red); color: var(--cream);
-  align-self: stretch;
+  display: flex; flex-direction: column; gap: 0.5rem;
 }
+.shop-actions .btn { width: 100%; }
+.btn-pause { background: var(--yellow); }
+.btn-quit { background: var(--red); color: var(--cream); }
 .powerup-btn {
   font-family: var(--font-body);
   display: flex; align-items: center; gap: 0.5em;
@@ -658,6 +661,35 @@ body {
 @keyframes freeze-shiver {
   0%, 100% { transform: translate(0, 0) rotate(-1deg); }
   50%      { transform: translate(2px, -1px) rotate(1deg); }
+}
+
+/* ---------------- pause overlay ---------------- */
+.pause-overlay {
+  position: fixed; inset: 0; z-index: 70;
+  background: var(--bg);
+  background-image:
+    radial-gradient(circle at 2px 2px, rgba(255, 246, 232, 0.28) 2.5px, transparent 3px),
+    radial-gradient(circle at 30px 34px, rgba(43, 27, 68, 0.12) 4px, transparent 5px);
+  background-size: 56px 56px, 88px 88px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: clamp(0.8rem, 3vh, 1.6rem);
+  padding: 1.5rem; text-align: center;
+}
+.pause-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.6rem, 12vw, 5.5rem);
+  color: var(--yellow);
+  -webkit-text-stroke: 3px var(--ink);
+  text-shadow: 0.45rem 0.45rem 0 var(--ink);
+  transform: rotate(-3deg);
+  animation: avatar-squish 2.6s infinite;
+}
+.pause-note {
+  font-weight: 800;
+  font-size: clamp(0.9rem, 2.8vw, 1.2rem);
+  color: var(--cream); text-shadow: 2px 2px 0 var(--ink);
+  max-width: 26em;
 }
 
 /* ---------------- scoreboard / game over ---------------- */
@@ -839,12 +871,14 @@ body {
   .pu-desc { display: none; }
   .pu-cost { margin-left: 0; }
   .pu-info { align-items: center; }
-  .btn-quit {
+  .shop-actions {
     margin-top: 0; margin-left: 0.5rem;
+    flex-direction: column; gap: 0.3rem;
     align-self: center; flex-shrink: 0;
     /* stay visible at the right edge while the power-up strip scrolls */
     position: sticky; right: 0;
   }
+  .shop-actions .btn { font-size: 0.65rem; padding: 0.35em 0.7em; }
   .hud-name { max-width: 4.5em; }
   /* HUD wraps: players on the first row, round + timer below */
   .hud { flex-wrap: wrap; row-gap: 0.3rem; }
@@ -855,8 +889,6 @@ body {
   .answer-stamp { font-size: 0.68rem; padding: 0.12em 0.6em; }
   .setting-label { min-width: 0; width: 100%; }
   .lobby-players { gap: 0.8rem; }
-  .mute-btn { bottom: auto; top: 0.5rem; right: 0.5rem; }
-  #screen-game .mute-btn { display: none; }
 }
 
 @media (max-height: 500px) and (orientation: landscape) {

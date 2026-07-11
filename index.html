@@ -36,6 +36,7 @@
       </div>
       <p id="title-error" class="error-text" role="alert"></p>
       <p class="credits">grab 1-3 friends · share a code · get smart or get squashed</p>
+      <button id="btn-mute" class="btn btn-small btn-yellow mute-btn" title="Toggle sound">🔊</button>
     </section>
 
     <!-- ============ JOIN SCREEN ============ -->
@@ -178,7 +179,10 @@
         <aside class="shop" id="shop">
           <h3 class="shop-title">POWER-UPS</h3>
           <div class="shop-items" id="shop-items"></div>
-          <button id="btn-quit-game" class="btn btn-small btn-quit">✕ QUIT</button>
+          <div class="shop-actions">
+            <button id="btn-pause" class="btn btn-small btn-pause">⏸ PAUSE</button>
+            <button id="btn-quit-game" class="btn btn-small btn-quit">✕ QUIT</button>
+          </div>
         </aside>
       </div>
 
@@ -186,6 +190,13 @@
         <span class="freeze-text">❄ FROZEN! ❄</span>
       </div>
     </section>
+
+    <!-- privacy pause: hides everything on THIS screen; the battle rages on -->
+    <div class="pause-overlay" id="pause-overlay" hidden>
+      <h2 class="pause-title">⏸ PAUSED</h2>
+      <p class="pause-note">Your screen is hidden — but the battle rages on and clocks keep ticking!</p>
+      <button id="btn-resume" class="btn btn-big btn-lime">RESUME</button>
+    </div>
 
     <!-- ============ INTERMISSION SCREEN ============ -->
     <section id="screen-intermission" class="screen">
@@ -250,7 +261,6 @@
       </div>
     </dialog>
 
-    <button id="btn-mute" class="btn btn-small btn-yellow mute-btn" title="Toggle sound">🔊</button>
   </main>
 
   <script src="js/vendor/supabase.js"></script>

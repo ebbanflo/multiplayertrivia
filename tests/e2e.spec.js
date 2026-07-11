@@ -269,6 +269,16 @@ test.describe('HMMM? two-player battle', () => {
     await waitForAnswering(host, '1-0');
     await waitForAnswering(guest, '1-0');
 
+    // The sound toggle lives on the title screen only
+    await expect(host.locator('#btn-mute')).toBeHidden();
+
+    // Pause hides the battlefield locally; resume brings it back
+    await host.click('#btn-pause');
+    await expect(host.locator('#pause-overlay')).toBeVisible();
+    await expect(host.locator('#pause-overlay')).toContainText('PAUSED');
+    await host.click('#btn-resume');
+    await expect(host.locator('#pause-overlay')).toBeHidden();
+
     // Cancel keeps the battle going
     await guest.click('#btn-quit-game');
     await expect(guest.locator('#modal')).toBeVisible();
@@ -309,6 +319,7 @@ test.describe('HMMM? two-player battle', () => {
     await friend.goto(`${APP}&join=${code}`);
     await expect(friend.locator('#btn-host')).toBeHidden();
     await expect(friend.locator('#btn-join')).toHaveText(`JOIN ROOM ${code}`);
+    await expect(friend.locator('#btn-mute')).toBeVisible(); // sound toggle on title
 
     // help overlay lists the rules and power-ups
     await friend.click('#btn-help');

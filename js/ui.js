@@ -166,6 +166,16 @@ export class GameUI {
     $('#btn-quit-game').addEventListener('click', quitWithConfirm);
     $('#btn-quit-intermission').addEventListener('click', quitWithConfirm);
 
+    // Privacy pause: hides this screen only — the match keeps running.
+    $('#btn-pause').addEventListener('click', () => {
+      sfx.click();
+      $('#pause-overlay').hidden = false;
+    });
+    $('#btn-resume').addEventListener('click', () => {
+      sfx.go();
+      $('#pause-overlay').hidden = true;
+    });
+
     // duel challenge dialog
     const stakeInput = $('#duel-stake');
     stakeInput.addEventListener('input', () => {
@@ -233,6 +243,7 @@ export class GameUI {
       this._setScores();
       this._renderDeadMarks();
       $('#hud-me-effects').innerHTML = '';
+      $('#pause-overlay').hidden = true;
       showScreen('screen-game');
       acquireWakeLock();
       sfx.go();
