@@ -1,7 +1,7 @@
 // Entry point: title screen, matchmaking, and session bootstrap.
 
 import { CODE_ALPHABET, CODE_LENGTH, DEBUG, TRANSPORT, POWERUPS } from './config.js';
-import { createTransport } from './net.js';
+import { createTransport, createSoloTransport } from './net.js';
 import { Game } from './game.js';
 import { GameUI, showScreen, toast } from './ui.js';
 import { sfx, isMuted, toggleMute } from './audio.js';
@@ -56,6 +56,32 @@ async function startSession(role, code) {
 
   await transport.join();
   return session;
+}
+
+// Solo run: no lobby, no network — straight into the question mines.
+async function soloGame() {
+  const btn = $('#btn-solo');
+  btn.disabled = true;
+  try {
+    const name = ($('#player-name').value.trim() || randomName()).toUpperCase().slice(0, 12);
+    const self = { id: playerId(), name, role: 'host' };
+    const transport = createSoloTransport(self);
+    const engine = new Game(transport, self);
+    engine.settings.mode = 'solo';
+    engine.settings.timer = 0; // untimed — speed bonus uses the virtual window
+    const ui = new GameUI(engine);
+    session = { transport, engine, ui };
+    if (DEBUG) window.__HMMM = session;
+    await transport.join();
+    sfx.go();
+    await engine.start();
+  } catch (err) {
+    showError($('#title-error'), `Couldn't start: ${err.message}`);
+    if (session) session.engine.destroy();
+    session = null;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function hostGame() {
@@ -120,10 +146,12 @@ function initTitle() {
   const hasLinkCode = new RegExp(`^[A-Z0-9]{${CODE_LENGTH}}$`).test(linkCode);
   if (hasLinkCode) {
     $('#btn-host').style.display = 'none';
+    $('#btn-solo').style.display = 'none';
     $('#btn-join').textContent = `JOIN ROOM ${linkCode}`;
   }
 
   $('#btn-host').addEventListener('click', () => { sfx.click(); hostGame(); });
+  $('#btn-solo').addEventListener('click', () => { sfx.click(); soloGame(); });
   $('#btn-join').addEventListener('click', () => {
     sfx.click();
     if (hasLinkCode) {

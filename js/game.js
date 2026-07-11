@@ -14,7 +14,7 @@ import {
   QUESTIONS_PER_ROUND, COUNTDOWN_MS, REVEAL_MS, RESOLVE_GRACE_MS,
   SCORE_BASE, SCORE_SPEED_MAX, SCORE_WRONG,
   POWERUPS, FREEZE_MS, TIMEWARP_MS, MAX_PLAYERS,
-  ROYALE_START, ROYALE_ANTE,
+  ROYALE_START, ROYALE_ANTE, SOLO_LIVES,
   DUEL_MAX_STAKE, GHOST_SHOT_MS, GHOST_REVIVE_POINTS,
 } from './config.js';
 import { buildQuestionSet, fetchDifficulty, royaleDifficulty } from './questions.js';
@@ -65,6 +65,7 @@ export class Game {
     this.pendingDuel = null;         // royale: { a, b, stake } queued for after this question
     this.duel = null;                // royale: active duel { a, b, stake, turn, dNum, q, qKey }
     this.ghost = null;               // royale: open last-shot window state
+    this.lives = SOLO_LIVES;         // solo: hearts remaining
 
     this._wire();
   }
@@ -241,6 +242,10 @@ export class Game {
 
   // ---------------- host: game flow ----------------
   async start() {
+    if (this.settings.mode === 'solo') {
+      if (this.isHost) this._startSolo();
+      return;
+    }
     if (!this.isHost || this.roster.length < 2) return;
     const royale = this.settings.mode === 'royale';
     this.ui('loading', { on: true });
@@ -300,6 +305,53 @@ export class Game {
       totalRounds: this.settings.rounds,
       q,
       duration: this.settings.timer > 0 ? this.settings.timer * 1000 : null,
+    });
+  }
+
+  // ---------------- host: solo flow ----------------
+  // A lone clay warrior vs the question mines: 3 lives, no timer,
+  // endless ramping questions. No shop, no pot — pure survival.
+  async _startSolo() {
+    this.ui('loading', { on: true });
+    try {
+      this.qPool = { easy: [], medium: [], hard: [] };
+      const first = royaleDifficulty(0, this.settings.ramp, this.settings.staticDiff);
+      this.qPool[first] = await fetchDifficulty(10, first, this.usedTexts);
+      for (const q of this.qPool[first]) this.usedTexts.add(q.text);
+    } finally {
+      this.ui('loading', { on: false });
+    }
+    this.qIndex = -1;
+    this.scores = { [this.me.id]: 0 };
+    this.fx = { [this.me.id]: {} };
+    this.lives = SOLO_LIVES;
+    this.alive = new Set([this.me.id]);
+    this.eliminated = new Set();
+    this.rematchVotes.clear();
+    this.emit('start-game', {
+      settings: this.settings, roster: this.roster, scores: this.scores, lives: this.lives,
+    });
+    this._after(600, () => this._soloNextQuestion());
+  }
+
+  async _soloNextQuestion() {
+    this.qIndex += 1;
+    const diff = royaleDifficulty(this.qIndex, this.settings.ramp, this.settings.staticDiff);
+    const q = await this._drawQuestion(diff);
+    const qKey = `s-${this.qIndex}`;
+    this.hq = {
+      qKey,
+      q,
+      active: new Set([this.me.id]),
+      answers: new Map(),
+      lockedOut: new Set(),
+      timeups: new Set(),
+      resolved: false,
+      candidates: [],
+      graceTimer: null,
+    };
+    this.emit('question', {
+      qKey, mode: 'solo', qNum: this.qIndex + 1, lives: this.lives, q, duration: null,
     });
   }
 
@@ -409,13 +461,18 @@ export class Game {
 
     if (!correct) {
       hq.lockedOut.add(playerId);
-      const delta = SCORE_WRONG;
+      let delta = SCORE_WRONG;
+      if (this.settings.mode === 'solo') {
+        delta = 0; // solo misses cost a heart, not points
+        this.lives -= 1;
+      }
       this.scores[playerId] += delta;
       if (this.settings.mode === 'royale' && this.scores[playerId] < 0) {
         this.scores[playerId] = 0;
       }
       this.emit('verdict', {
-        qKey, playerId, idx, correct: false, delta, scores: { ...this.scores },
+        qKey, playerId, idx, correct: false, delta, lives: this.lives,
+        scores: { ...this.scores },
       });
       this._maybeResolve();
       return;
@@ -511,6 +568,7 @@ export class Game {
       doubled,
       reason,
       pot: this.pot,
+      lives: this.lives,
       eliminated,
       ghostRevived: ghostData ? ghostData.revived : [],
       ghostAnswers: ghostData ? ghostData.answers : {},
@@ -518,7 +576,17 @@ export class Game {
     });
 
     this._after(REVEAL_MS, () => {
-      if (royale) {
+      if (this.settings.mode === 'solo') {
+        if (this.lives <= 0) {
+          this.phase = 'gameover';
+          this.emit('game-end', {
+            scores: { ...this.scores }, winnerIds: [],
+            solo: { questions: this.qIndex + 1 },
+          });
+        } else {
+          this._soloNextQuestion();
+        }
+      } else if (royale) {
         if (this.alive.size <= 1) this._royaleGameEnd();
         else if (this.pendingDuel) this._startDuel();
         else this._royaleNextQuestion();

@@ -176,8 +176,19 @@ class LocalTransport extends BaseTransport {
 
 // ---------------------------------------------------------------------------
 
+// Solo mode plays entirely offline: no channel, no peers, no messages.
+class NullTransport extends BaseTransport {
+  join() { return Promise.resolve(); }
+  send() {}
+  leave() {}
+}
+
 export function createTransport(code, self) {
   return TRANSPORT === 'local'
     ? new LocalTransport(code, self)
     : new SupabaseTransport(code, self);
+}
+
+export function createSoloTransport(self) {
+  return new NullTransport('solo', self);
 }

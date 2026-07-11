@@ -47,6 +47,7 @@ export const POWERUPS = {
 export const FREEZE_MS = 5000;
 export const TIMEWARP_MS = 15000;
 
+export const SOLO_LIVES = 3;
 export const DUEL_MAX_STAKE = 200;
 export const GHOST_SHOT_MS = 8000;    // window for the fallen to attempt a revival
 export const GHOST_REVIVE_POINTS = 100;

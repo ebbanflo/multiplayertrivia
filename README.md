@@ -48,6 +48,13 @@ An endless, elimination-based alternative to the classic match:
   eliminated get one shot at it. Any ghost who answers correctly rises
   again with 100 points.
 
+### Solo Run 🧍
+
+No friends online? **SOLO RUN** on the title screen skips the lobby
+entirely (no room, no network): endless ramping questions, no timer,
+**3 lives**. A miss costs a heart, a correct answer banks points, and at
+zero hearts you get your survival stats and a PLAY AGAIN button.
+
 ### Settings (chosen by the host)
 
 | Setting | Options |
@@ -56,7 +63,7 @@ An endless, elimination-based alternative to the classic match:
 | Difficulty (classic) | Easy · Medium · Hard · **Ramp Up!** (easy → hard across the game) |
 | Ramp dial (royale) | 1 static · 2 slow · 3 ramp · 4 wobbly · 5 chaos |
 | Ante (royale) | 25 · 50 · 100 per question |
-| Timer | 30 sec · 1 min · No timer (classic only — Royale needs a clock) |
+| Timer | 10 sec · 30 sec · 1 min · No timer (classic only — Royale needs a clock) |
 | Rounds (classic) | 1 · 2 · 3 · 5 (10 questions each) |
 
 ### Power-ups 🛒

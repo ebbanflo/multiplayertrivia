@@ -150,7 +150,9 @@ export class GameUI {
       sfx.click();
       this.g.voteRematch();
       $('#btn-rematch').disabled = true;
-      $('#gameover-status').textContent = 'Waiting for the other players to accept…';
+      if (this.g.settings.mode !== 'solo') {
+        $('#gameover-status').textContent = 'Waiting for the other players to accept…';
+      }
     });
     $('#btn-exit').addEventListener('click', () => this._leave());
     $('#btn-lobby-leave').addEventListener('click', () => this._leave());
@@ -236,10 +238,13 @@ export class GameUI {
     });
 
     g.onUI('game-start', () => {
+      const solo = g.settings.mode === 'solo';
       $('#hud-me-name').textContent = g.me.name.toUpperCase();
       const meAvatar = $('#hud-me-avatar');
       meAvatar.className = `clay-avatar small pcolor-${g.playerSlot(g.me.id)}`;
-      this._renderOthersHud();
+      $('#shop').classList.toggle('solo', solo); // no shop in solo — pure survival
+      if (solo) this._renderLives();
+      else this._renderOthersHud();
       this._setScores();
       this._renderDeadMarks();
       $('#hud-me-effects').innerHTML = '';
@@ -293,7 +298,12 @@ export class GameUI {
         buzz([70, 50, 70]);
         const btn = $$('.answer-btn')[data.idx];
         if (btn) btn.classList.add('wrong-reveal');
-        this._banner('WRONG!', 'bad');
+        if (g.settings.mode === 'solo') {
+          this._renderLives();
+          this._banner(g.lives > 0 ? `OUCH! ${g.lives} ❤️ LEFT` : '💀 OUT OF LIVES!', 'bad');
+        } else {
+          this._banner('WRONG!', 'bad');
+        }
         this._setAnswersEnabled(false);
       } else {
         // Show exactly which answer they whiffed on.
@@ -425,16 +435,29 @@ export class GameUI {
       showScreen('screen-game');
     });
 
-    g.onUI('game-end', ({ scores, winnerIds }) => {
+    g.onUI('game-end', (data) => {
       this._stopTimer();
       releaseWakeLock();
+      const { scores, winnerIds } = data;
+      $('#btn-rematch').disabled = false;
+      if (g.settings.mode === 'solo') {
+        const survived = data.solo ? data.solo.questions : 0;
+        const banked = scores[g.me.id] ?? 0;
+        $('#gameover-title').textContent = 'RUN OVER!';
+        $('#gameover-status').textContent = `You survived ${survived} question${survived === 1 ? '' : 's'} and banked ${banked} points!`;
+        $('#btn-rematch').textContent = 'PLAY AGAIN!';
+        this._renderBoard($('#final-board'), scores, []);
+        showScreen('screen-gameover');
+        sfx.womp();
+        return;
+      }
+      $('#btn-rematch').textContent = 'REMATCH!';
       const won = winnerIds.includes(g.me.id);
       const tie = winnerIds.length > 1;
       const royale = g.settings.mode === 'royale';
       $('#gameover-title').textContent = tie ? "IT'S A TIE?!"
         : (won ? (royale ? 'LAST ONE STANDING!' : 'YOU WIN!') : 'SQUASHED!');
       this._renderBoard($('#final-board'), scores, winnerIds);
-      $('#btn-rematch').disabled = false;
       $('#gameover-status').textContent = tie
         ? 'Great minds squish alike.'
         : (won ? 'Absolute trivia titan.' : 'Avenge yourself with a rematch!');
@@ -522,6 +545,13 @@ export class GameUI {
   }
 
   // ---------- HUD ----------
+  // Solo: opponents' spot shows your hearts instead.
+  _renderLives() {
+    const lives = Math.max(0, this.g.lives);
+    $('#hud-others').innerHTML =
+      `<div class="hud-lives" id="hud-lives">${'❤️'.repeat(lives)}${'🖤'.repeat(Math.max(0, 3 - lives))}</div>`;
+  }
+
   _renderOthersHud() {
     const g = this.g;
     const wrap = $('#hud-others');
@@ -547,7 +577,9 @@ export class GameUI {
     $('#verdict-banner').className = 'verdict-banner';
     $('#hud-round').textContent = mode === 'royale'
       ? `ROYALE ∞ · Q${qNum} · 💰${pot}`
-      : `R${round}/${totalRounds} · Q${qIndex + 1}/${QUESTIONS_PER_ROUND}`;
+      : mode === 'solo'
+        ? `SOLO ∞ · Q${qNum}`
+        : `R${round}/${totalRounds} · Q${qIndex + 1}/${QUESTIONS_PER_ROUND}`;
     $('#q-category').textContent = q.category;
     const diffEl = $('#q-difficulty');
     diffEl.textContent = q.difficulty.toUpperCase();
@@ -716,6 +748,10 @@ export class GameUI {
       this._stampAnswer(data.correctIndex, data.winnerId, 'correct');
       const name = this.g.playerName(data.winnerId).toUpperCase();
       this._banner(royale ? `${name} TAKES THE POT!` : `${name} GOT IT!`, 'bad');
+    } else if (this.g.settings.mode === 'solo') {
+      // the verdict banner already delivered the bad news; keep the
+      // hearts current through the reveal
+      this._renderLives();
     } else if (royale) {
       sfx.womp();
       this._banner(`POT ROLLS OVER! 💰${data.pot}`, 'info');

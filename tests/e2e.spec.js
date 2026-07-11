@@ -340,6 +340,56 @@ test.describe('HMMM? two-player battle', () => {
     await expect(lost.locator('#title-error')).toHaveText(/Room not found/, { timeout: 10_000 });
   });
 
+  test('10-second timer mode runs the clock at 10s', async ({ context }) => {
+    await stubApis(context);
+    const { host, guest } = await setupMatch(context, { timer: '10' });
+    await expect(guest.locator('[data-setting="timer"] .chip[data-value="10"]')).toHaveClass(/selected/);
+    await host.click('#btn-start');
+    await waitForAnswering(host, '1-0');
+    expect(await host.evaluate(() => window.__HMMM.engine.currentQ.duration)).toBe(10_000);
+    // nobody answers: the 10s clock expires the question quickly
+    await expect(host.locator('#verdict-banner')).toHaveText(/TIME'S UP!/, { timeout: 18_000 });
+  });
+
+  test('solo run: 3 lives, untimed, endless, play again', async ({ context }) => {
+    await stubApis(context);
+    const page = await context.newPage();
+    await page.goto(APP);
+    await page.fill('#player-name', 'LONER');
+    await page.click('#btn-solo');
+
+    // straight into the game — no lobby, no shop, hearts up top
+    await waitForAnswering(page, 's-0');
+    await expect(page.locator('#hud-round')).toHaveText('SOLO ∞ · Q1');
+    await expect(page.locator('#hud-lives')).toHaveText('❤️❤️❤️');
+    await expect(page.locator('.powerup-btn').first()).toBeHidden();
+    await expect(page.locator('#timer-num')).toHaveText('∞');
+
+    // correct answer banks points, keeps hearts
+    await clickAnswer(page, { correct: true });
+    await waitForReveal(page);
+    expect((await engineState(page)).myScore).toBeGreaterThanOrEqual(100);
+
+    // three misses burn the three hearts
+    for (let i = 1; i <= 3; i++) {
+      await waitForAnswering(page, `s-${i}`);
+      await clickAnswer(page, { correct: false });
+      await expect(page.locator('#hud-lives')).toHaveText('❤️'.repeat(3 - i) + '🖤'.repeat(i));
+      if (i < 3) await waitForReveal(page);
+    }
+
+    await expect(page.locator('#screen-gameover')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('#gameover-title')).toHaveText('RUN OVER!');
+    await expect(page.locator('#gameover-status')).toHaveText(/survived 4 questions/);
+    await expect(page.locator('#btn-rematch')).toHaveText('PLAY AGAIN!');
+
+    // play again: fresh run, full hearts, zero score
+    await page.click('#btn-rematch');
+    await waitForAnswering(page, 's-0');
+    await expect(page.locator('#hud-lives')).toHaveText('❤️❤️❤️');
+    expect((await engineState(page)).myScore).toBe(0);
+  });
+
   test('joining a nonexistent room shows an error', async ({ context }) => {
     await stubApis(context);
     const page = await context.newPage();
