@@ -15,6 +15,7 @@ import {
   SCORE_BASE, SCORE_SPEED_MAX, SCORE_WRONG,
   POWERUPS, FREEZE_MS, TIMEWARP_MS, MAX_PLAYERS,
   ROYALE_START, ROYALE_ANTE,
+  DUEL_MAX_STAKE, GHOST_SHOT_MS, GHOST_REVIVE_POINTS,
 } from './config.js';
 import { buildQuestionSet, fetchDifficulty, royaleDifficulty } from './questions.js';
 
@@ -43,12 +44,13 @@ export class Game {
     this.frozenUntil = 0;
     this.myDeadlineExtra = 0;        // timewarp extension for the current question
     this.usedPowerupsThisQ = new Set();
-    this.myShield = false;           // mirrored badges (host holds the truth)
-    this.myDouble = false;
+    this.myDouble = false;           // mirrored badge (host holds the truth)
 
     // Royale mode client state (mirrored from host events)
     this.pot = 0;
     this.eliminated = new Set();     // playerIds knocked out this game
+    this.ghostShotQKey = null;       // set while a last-shot window is open
+    this.ghostAnswered = false;
 
     // Host-only state
     this.questions = [];
@@ -60,6 +62,9 @@ export class Game {
     this.hostTimers = [];
     this.alive = new Set();          // royale: players still standing
     this.qPool = null;               // royale: { easy: [], medium: [], hard: [] }
+    this.pendingDuel = null;         // royale: { a, b, stake } queued for after this question
+    this.duel = null;                // royale: active duel { a, b, stake, turn, dNum, q, qKey }
+    this.ghost = null;               // royale: open last-shot window state
 
     this._wire();
   }
@@ -92,7 +97,9 @@ export class Game {
     const types = [
       'lobby-state', 'start-game', 'question', 'answer', 'timeup', 'buy',
       'powerup-applied', 'verdict', 'q-end', 'round-end', 'next-round',
-      'game-end', 'rematch-vote', 'player-left', 'quit',
+      'game-end', 'rematch-vote', 'player-left', 'quit', 'royale-ante',
+      'duel-request', 'duel-pending', 'duel-q', 'duel-answer', 'duel-verdict',
+      'duel-end', 'ghost-shot', 'ghost-answer',
     ];
     for (const type of types) {
       this.t.on(type, ({ from, data }) => this._handle(type, from, data));
@@ -170,6 +177,18 @@ export class Game {
     }
     // Mid-game: everyone learns; the match continues if 2+ remain.
     this.alive.delete(id);
+    if (this.pendingDuel && (this.pendingDuel.a === id || this.pendingDuel.b === id)) {
+      this.pendingDuel = null;
+    }
+    if (this.duel && (this.duel.a === id || this.duel.b === id)) {
+      // A duelist walked out — the duel is off, no transfer.
+      this.duel = null;
+      this.emit('duel-end', { canceled: true, scores: { ...this.scores } });
+      this._after(1500, () => {
+        if (this.alive.size <= 1) this._royaleGameEnd();
+        else this._royaleNextQuestion();
+      });
+    }
     this.emit('player-left', { playerId: id, name, roster: this.roster });
     if (this.roster.length < 2) {
       this._clearHostTimers();
@@ -245,6 +264,9 @@ export class Game {
     this.scores = {};
     this.fx = {};
     this.pot = 0;
+    this.pendingDuel = null;
+    this.duel = null;
+    this.ghost = null;
     this.alive = new Set(this.roster.map((p) => p.id));
     for (const p of this.roster) {
       this.scores[p.id] = royale ? ROYALE_START : 0;
@@ -305,20 +327,10 @@ export class Game {
     });
     if (this.alive.size <= 1) { this._royaleGameEnd(); return; }
 
-    // Draw a question at the ramp dial's difficulty, refilling the pool
-    // from the APIs as needed (reveal pauses hide the fetch time).
+    // Draw a question at the ramp dial's difficulty (reveal pauses hide
+    // any refill fetch time).
     const diff = royaleDifficulty(this.qIndex, this.settings.ramp, this.settings.staticDiff);
-    if (!this.qPool[diff].length) {
-      const batch = await fetchDifficulty(10, diff, this.usedTexts);
-      for (const q of batch) this.usedTexts.add(q.text);
-      this.qPool[diff].push(...batch);
-    } else if (this.qPool[diff].length < 3) {
-      fetchDifficulty(10, diff, this.usedTexts).then((batch) => {
-        for (const q of batch) this.usedTexts.add(q.text);
-        this.qPool[diff].push(...batch);
-      }).catch(() => { /* next draw retries synchronously */ });
-    }
-    const q = this.qPool[diff].shift();
+    const q = await this._drawQuestion(diff);
 
     const qKey = `r-${this.qIndex}`;
     this.hq = {
@@ -397,16 +409,13 @@ export class Game {
 
     if (!correct) {
       hq.lockedOut.add(playerId);
-      const fx = this.fx[playerId] || {};
-      let delta = SCORE_WRONG;
-      let shielded = false;
-      if (fx.shield) { delta = 0; shielded = true; fx.shield = false; }
+      const delta = SCORE_WRONG;
       this.scores[playerId] += delta;
       if (this.settings.mode === 'royale' && this.scores[playerId] < 0) {
         this.scores[playerId] = 0;
       }
       this.emit('verdict', {
-        qKey, playerId, idx, correct: false, shielded, delta, scores: { ...this.scores },
+        qKey, playerId, idx, correct: false, delta, scores: { ...this.scores },
       });
       this._maybeResolve();
       return;
@@ -459,6 +468,26 @@ export class Game {
       this.scores[winnerId] += winDelta;
     }
 
+    // Royale ghost shot: every living player answered WRONG, and there
+    // are fallen players watching — they get one chance to resurrect
+    // before the reveal.
+    if (royale && reason === 'locked' && !winnerId) {
+      const ghosts = this.roster
+        .map((p) => p.id)
+        .filter((id) => !hq.active.has(id) && !this.alive.has(id));
+      if (ghosts.length) {
+        this._startGhostShot(ghosts, reason);
+        return;
+      }
+    }
+
+    this._finalizeQuestion(reason, winnerId, winDelta, doubled, null);
+  }
+
+  _finalizeQuestion(reason, winnerId, winDelta, doubled, ghostData) {
+    const hq = this.hq;
+    const royale = this.settings.mode === 'royale';
+
     // Royale: wrong-answer penalties may have finished someone off.
     const eliminated = [];
     if (royale) {
@@ -483,12 +512,15 @@ export class Game {
       reason,
       pot: this.pot,
       eliminated,
+      ghostRevived: ghostData ? ghostData.revived : [],
+      ghostAnswers: ghostData ? ghostData.answers : {},
       scores: { ...this.scores },
     });
 
     this._after(REVEAL_MS, () => {
       if (royale) {
         if (this.alive.size <= 1) this._royaleGameEnd();
+        else if (this.pendingDuel) this._startDuel();
         else this._royaleNextQuestion();
       } else if (isLastQuestion) {
         const top = Math.max(...this.roster.map((p) => this.scores[p.id] ?? 0));
@@ -506,6 +538,143 @@ export class Game {
     });
   }
 
+  // ---------------- host: ghost last shot ----------------
+  _startGhostShot(ghosts, reason) {
+    this.ghost = {
+      qKey: this.hq.qKey,
+      reason,
+      waiting: new Set(ghosts),
+      answers: new Map(),
+    };
+    this.emit('ghost-shot', { qKey: this.hq.qKey, ghosts, duration: GHOST_SHOT_MS });
+    this._after(GHOST_SHOT_MS + 800, () => this._resolveGhostShot());
+  }
+
+  _hostOnGhostAnswer(playerId, { qKey, idx }) {
+    const g = this.ghost;
+    if (!g || g.qKey !== qKey || !g.waiting.has(playerId) || g.answers.has(playerId)) return;
+    g.answers.set(playerId, idx);
+    if (g.answers.size >= g.waiting.size) this._resolveGhostShot();
+  }
+
+  _resolveGhostShot() {
+    const g = this.ghost;
+    if (!g) return;
+    this.ghost = null;
+    const revived = [];
+    const answers = {};
+    for (const [id, idx] of g.answers) {
+      answers[id] = idx;
+      if (idx === this.hq.q.correctIndex) {
+        this.alive.add(id);
+        this.scores[id] = GHOST_REVIVE_POINTS;
+        revived.push(id);
+      }
+    }
+    this._finalizeQuestion(g.reason, null, 0, false, { revived, answers });
+  }
+
+  // ---------------- host: duels ----------------
+  _hostOnDuelRequest(playerId, { qKey, targetId, stake }) {
+    const hq = this.hq;
+    if (this.settings.mode !== 'royale') return;
+    if (!hq || hq.resolved || hq.qKey !== qKey) return;
+    if (this.pendingDuel || this.duel) return;
+    if (playerId === targetId) return;
+    if (!this.alive.has(playerId) || !this.alive.has(targetId)) return;
+    const amount = Math.max(0, Math.min(DUEL_MAX_STAKE, Math.round(stake) || 0));
+    const fx = this.fx[playerId] = this.fx[playerId] || {};
+    fx.usedThisQ = fx.usedThisQ && fx.usedThisQKey === qKey ? fx.usedThisQ : new Set();
+    fx.usedThisQKey = qKey;
+    if (fx.usedThisQ.has('duel')) return;
+    fx.usedThisQ.add('duel');
+
+    this.pendingDuel = { a: playerId, b: targetId, stake: amount };
+    this.emit('duel-pending', { ...this.pendingDuel });
+  }
+
+  _startDuel() {
+    const d = this.pendingDuel;
+    this.pendingDuel = null;
+    // A duelist may have been eliminated (or left) since the challenge.
+    if (!d || !this.alive.has(d.a) || !this.alive.has(d.b)) {
+      this.emit('duel-end', { canceled: true, scores: { ...this.scores } });
+      this._after(1200, () => this._royaleNextQuestion());
+      return;
+    }
+    this.duel = { ...d, turn: d.a, dNum: 0 };
+    this._duelQuestion();
+  }
+
+  async _duelQuestion() {
+    const duel = this.duel;
+    if (!duel) return;
+    const diff = royaleDifficulty(this.qIndex, this.settings.ramp, this.settings.staticDiff);
+    duel.q = await this._drawQuestion(diff);
+    duel.qKey = `d-${this.qIndex}-${duel.dNum}`;
+    this.emit('duel-q', {
+      qKey: duel.qKey,
+      q: duel.q,
+      duel: { a: duel.a, b: duel.b, stake: duel.stake },
+      turnId: duel.turn,
+      dNum: duel.dNum,
+    });
+  }
+
+  _hostOnDuelAnswer(playerId, { qKey, idx }) {
+    const duel = this.duel;
+    if (!duel || duel.qKey !== qKey || duel.turn !== playerId) return;
+    const correct = idx === duel.q.correctIndex;
+    this.emit('duel-verdict', { qKey, playerId, idx, correct });
+
+    if (correct) {
+      duel.turn = duel.turn === duel.a ? duel.b : duel.a;
+      duel.dNum += 1;
+      this._after(1600, () => this._duelQuestion());
+      return;
+    }
+
+    // First miss loses. The stake moves; a stack too small to cover it
+    // busts out entirely.
+    const loserId = playerId;
+    const winnerId = loserId === duel.a ? duel.b : duel.a;
+    const pre = this.scores[loserId];
+    const transfer = Math.min(duel.stake, pre);
+    this.scores[loserId] -= transfer;
+    this.scores[winnerId] += transfer;
+    const eliminated = [];
+    if (duel.stake > 0 && this.scores[loserId] <= 0) {
+      this.scores[loserId] = 0;
+      this.alive.delete(loserId);
+      eliminated.push(loserId);
+    }
+    this.duel = null;
+    this.emit('duel-end', {
+      winnerId, loserId, stake: duel.stake, transfer, eliminated,
+      scores: { ...this.scores },
+    });
+    this._after(REVEAL_MS, () => {
+      if (this.alive.size <= 1) this._royaleGameEnd();
+      else this._royaleNextQuestion();
+    });
+  }
+
+  // Draw one question of the given difficulty from the endless pool,
+  // refilling from the APIs as needed.
+  async _drawQuestion(diff) {
+    if (!this.qPool[diff].length) {
+      const batch = await fetchDifficulty(10, diff, this.usedTexts);
+      for (const q of batch) this.usedTexts.add(q.text);
+      this.qPool[diff].push(...batch);
+    } else if (this.qPool[diff].length < 3) {
+      fetchDifficulty(10, diff, this.usedTexts).then((batch) => {
+        for (const q of batch) this.usedTexts.add(q.text);
+        this.qPool[diff].push(...batch);
+      }).catch(() => { /* next draw retries synchronously */ });
+    }
+    return this.qPool[diff].shift();
+  }
+
   _hostOnBuy(playerId, { qKey, type }) {
     const hq = this.hq;
     const def = POWERUPS[type];
@@ -513,16 +682,16 @@ export class Game {
     if (this.phase !== 'answering' && this.phase !== 'countdown') return;
     if (hq.lockedOut.has(playerId) || hq.answers.has(playerId)) return;
     if (type === 'timewarp' && !(this.settings.timer > 0)) return;
+    if (type === 'duel') return; // duels go through duel-request
     const fx = this.fx[playerId] = this.fx[playerId] || {};
     fx.usedThisQ = fx.usedThisQ && fx.usedThisQKey === qKey ? fx.usedThisQ : new Set();
     fx.usedThisQKey = qKey;
     if (fx.usedThisQ.has(type)) return;
-    if ((type === 'shield' && fx.shield) || (type === 'double' && fx.double)) return;
+    if (type === 'double' && fx.double) return;
     if (this.scores[playerId] < def.cost) return;
 
     this.scores[playerId] -= def.cost;
     fx.usedThisQ.add(type);
-    if (type === 'shield') fx.shield = true;
     if (type === 'double') fx.double = true;
 
     this.emit('powerup-applied', {
@@ -538,7 +707,34 @@ export class Game {
 
   // ---------------- player actions (all roles) ----------------
   answer(idx) {
+    if (!this.currentQ) return;
+
+    // Ghost last shot: an eliminated player answering inside the window.
+    if (this.ghostShotQKey && this.ghostShotQKey === this.currentQ.qKey
+        && this.eliminated.has(this.me.id)) {
+      if (this.ghostAnswered) return;
+      this.ghostAnswered = true;
+      const payload = { qKey: this.currentQ.qKey, idx };
+      this.ui('me-submitted', { idx });
+      if (this.isHost) this._hostOnGhostAnswer(this.me.id, payload);
+      else this.t.send('ghost-answer', payload);
+      return;
+    }
+
     if (this.eliminated.has(this.me.id)) return; // spectators watch, only
+
+    // Duel questions: only the duelist whose turn it is may answer.
+    if (this.currentQ.duel) {
+      if (this.currentQ.turnId !== this.me.id) return;
+      if (this.phase !== 'answering' || this.myAnswered) return;
+      this.myAnswered = true;
+      const payload = { qKey: this.currentQ.qKey, idx };
+      this.ui('me-submitted', { idx });
+      if (this.isHost) this._hostOnDuelAnswer(this.me.id, payload);
+      else this.t.send('duel-answer', payload);
+      return;
+    }
+
     if (this.phase !== 'answering' || this.myAnswered || this.myLockedOut) return;
     if (performance.now() < this.frozenUntil) return;
     this.myAnswered = true;
@@ -547,6 +743,17 @@ export class Game {
     this.ui('me-submitted', { idx });
     if (this.isHost) this._hostOnAnswer(this.me.id, payload);
     else this.t.send('answer', payload);
+  }
+
+  // Royale: challenge another living player to a duel.
+  buyDuel(targetId, stake) {
+    if (this.settings.mode !== 'royale') return;
+    if (this.eliminated.has(this.me.id)) return;
+    if (this.phase !== 'answering' || !this.currentQ || this.currentQ.duel) return;
+    if (this.usedPowerupsThisQ.has('duel')) return;
+    const payload = { qKey: this.currentQ.qKey, targetId, stake };
+    if (this.isHost) this._hostOnDuelRequest(this.me.id, payload);
+    else this.t.send('duel-request', payload);
   }
 
   timeup() {
@@ -606,10 +813,10 @@ export class Game {
         this.settings = data.settings;
         this.roster = data.roster;
         this.scores = { ...data.scores };
-        this.myShield = false;
         this.myDouble = false;
         this.pot = 0;
         this.eliminated = new Set();
+        this.ghostShotQKey = null;
         this.phase = 'countdown';
         this.ui('game-start', { settings: this.settings, roster: this.roster, scores: this.scores });
         return;
@@ -631,6 +838,8 @@ export class Game {
         this.myLockedOut = false;
         this.myDeadlineExtra = 0;
         this.usedPowerupsThisQ = new Set();
+        this.ghostShotQKey = null;
+        this.ghostAnswered = false;
         this.ui('question', data);
         // Shared 3-2-1 lead-in, then answers unlock.
         setTimeout(() => {
@@ -662,7 +871,6 @@ export class Game {
         this.scores = { ...data.scores };
         if (data.playerId === this.me.id) {
           this.myLockedOut = true;
-          if (data.shielded) this.myShield = false;
         }
         this.ui('verdict', data);
         return;
@@ -672,7 +880,6 @@ export class Game {
         this.scores = { ...data.scores };
         if (data.playerId === this.me.id) {
           this.usedPowerupsThisQ.add(data.type);
-          if (data.type === 'shield') this.myShield = true;
           if (data.type === 'double') this.myDouble = true;
           if (data.type === 'timewarp') this.myDeadlineExtra += TIMEWARP_MS;
         } else if (data.type === 'freeze') {
@@ -687,9 +894,71 @@ export class Game {
         this.scores = { ...data.scores };
         this.phase = 'reveal';
         if (data.pot !== undefined) this.pot = data.pot;
+        for (const id of data.ghostRevived || []) this.eliminated.delete(id);
         for (const id of data.eliminated || []) this.eliminated.add(id);
+        this.ghostShotQKey = null;
         if (data.winnerId === this.me.id && data.doubled) this.myDouble = false;
         this.ui('q-end', data);
+        return;
+      }
+
+      case 'duel-request': {
+        if (this.isHost && from !== this.me.id) this._hostOnDuelRequest(from, data);
+        return;
+      }
+
+      case 'duel-pending': {
+        if (data.a === this.me.id) this.usedPowerupsThisQ.add('duel');
+        this.ui('duel-pending', data);
+        return;
+      }
+
+      case 'duel-q': {
+        this.currentQ = { qKey: data.qKey, q: data.q, duel: data.duel, turnId: data.turnId };
+        this.phase = 'countdown';
+        this.myAnswered = false;
+        this.myLockedOut = false;
+        this.ui('duel-q', data);
+        // Short "⚔️" splash, then the duelist is up. No timer.
+        setTimeout(() => {
+          if (!this.currentQ || this.currentQ.qKey !== data.qKey) return;
+          this.phase = 'answering';
+          this.goAt = performance.now();
+          this.ui('duel-unlocked', { qKey: data.qKey, turnId: data.turnId });
+        }, 1100);
+        return;
+      }
+
+      case 'duel-answer': {
+        if (this.isHost && from !== this.me.id) this._hostOnDuelAnswer(from, data);
+        return;
+      }
+
+      case 'duel-verdict': {
+        this.ui('duel-verdict', data);
+        return;
+      }
+
+      case 'duel-end': {
+        if (data.scores) this.scores = { ...data.scores };
+        for (const id of data.eliminated || []) this.eliminated.add(id);
+        this.phase = 'reveal';
+        this.ui('duel-end', data);
+        return;
+      }
+
+      case 'ghost-shot': {
+        this.ghostShotQKey = data.qKey;
+        this.ghostAnswered = false;
+        // Fresh clock for the revival window (the UI timer reads goAt).
+        this.goAt = performance.now();
+        this.myDeadlineExtra = 0;
+        this.ui('ghost-shot', { ...data, mine: this.eliminated.has(this.me.id) });
+        return;
+      }
+
+      case 'ghost-answer': {
+        if (this.isHost && from !== this.me.id) this._hostOnGhostAnswer(from, data);
         return;
       }
 

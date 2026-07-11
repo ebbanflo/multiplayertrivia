@@ -166,6 +166,20 @@ export class GameUI {
     $('#btn-quit-game').addEventListener('click', quitWithConfirm);
     $('#btn-quit-intermission').addEventListener('click', quitWithConfirm);
 
+    // duel challenge dialog
+    const stakeInput = $('#duel-stake');
+    stakeInput.addEventListener('input', () => {
+      $('#duel-stake-val').textContent = stakeInput.value;
+    });
+    $('#btn-duel-cancel').addEventListener('click', () => { sfx.click(); $('#duel-modal').close(); });
+    $('#btn-duel-go').addEventListener('click', () => {
+      const sel = $('#duel-targets .chip.selected');
+      if (!sel) return;
+      sfx.go();
+      this.g.buyDuel(sel.dataset.pid, parseInt(stakeInput.value, 10));
+      $('#duel-modal').close();
+    });
+
     $$('.answer-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const idx = parseInt(btn.dataset.idx, 10);
@@ -268,14 +282,13 @@ export class GameUI {
         buzz([70, 50, 70]);
         const btn = $$('.answer-btn')[data.idx];
         if (btn) btn.classList.add('wrong-reveal');
-        this._banner(data.shielded ? '🛡️ SHIELDED!' : 'WRONG!', data.shielded ? 'info' : 'bad');
+        this._banner('WRONG!', 'bad');
         this._setAnswersEnabled(false);
-        if (data.shielded) this._refreshFxBadges();
       } else {
         // Show exactly which answer they whiffed on.
         sfx.steal();
         this._stampAnswer(data.idx, data.playerId, 'wrong');
-        toast(`${g.playerName(data.playerId).toUpperCase()} WHIFFED! ${data.shielded ? '(shielded)' : ''}`);
+        toast(`${g.playerName(data.playerId).toUpperCase()} WHIFFED!`);
       }
       this._refreshShop();
     });
@@ -303,6 +316,87 @@ export class GameUI {
     });
 
     g.onUI('q-end', (data) => this._renderQEnd(data));
+
+    // ---- duels ----
+    g.onUI('duel-pending', ({ a, b, stake }) => {
+      sfx.powerup();
+      toast(`⚔️ ${g.playerName(a).toUpperCase()} CHALLENGES ${g.playerName(b).toUpperCase()} — ${stake} ON THE LINE!`);
+      this._refreshShop();
+    });
+
+    g.onUI('duel-q', (data) => this._renderDuelQuestion(data));
+
+    g.onUI('duel-unlocked', ({ turnId }) => {
+      $('#countdown-overlay').classList.remove('show');
+      if (turnId === g.me.id) {
+        this._setAnswersEnabled(true);
+        sfx.go();
+      }
+    });
+
+    g.onUI('duel-verdict', (data) => {
+      this._setAnswersEnabled(false);
+      const name = g.playerName(data.playerId).toUpperCase();
+      if (data.correct) {
+        sfx.correct();
+        this._stampAnswer(data.idx, data.playerId, 'correct');
+        this._banner(`${name} NAILS IT!`, 'good');
+      } else {
+        sfx.wrong();
+        if (data.playerId === g.me.id) buzz([70, 50, 70]);
+        const btns = $$('.answer-btn');
+        const correctIdx = g.currentQ.q.correctIndex;
+        if (btns[data.idx]) btns[data.idx].classList.add('wrong-reveal');
+        btns[correctIdx].classList.add('correct-reveal');
+        btns.forEach((b, i) => { if (i !== correctIdx) b.classList.add('dimmed'); });
+      }
+    });
+
+    g.onUI('duel-end', (data) => {
+      if (data.canceled) {
+        toast('⚔️ DUEL CALLED OFF!');
+        return;
+      }
+      const winner = g.playerName(data.winnerId).toUpperCase();
+      const loser = g.playerName(data.loserId).toUpperCase();
+      if (data.transfer > 0) {
+        this._setScores({ [data.winnerId]: data.transfer, [data.loserId]: -data.transfer });
+      } else {
+        this._setScores();
+      }
+      if (data.winnerId === g.me.id) {
+        sfx.fanfare();
+        this._banner(`⚔️ DUEL WON! +${data.transfer}`, 'good');
+      } else if (data.loserId === g.me.id) {
+        sfx.womp();
+        buzz(250);
+        this._banner(`⚔️ DUELED DOWN! -${data.transfer}`, 'bad');
+      } else {
+        sfx.steal();
+        this._banner(`⚔️ ${winner} BEATS ${loser}!`, 'info');
+      }
+      for (const id of data.eliminated || []) {
+        toast(id === g.me.id
+          ? '💀 The duel broke your stack. Spectating…'
+          : `💀 ${g.playerName(id).toUpperCase()} IS OUT!`);
+      }
+      this._renderDeadMarks();
+      this._refreshShop();
+    });
+
+    // ---- ghost last shot ----
+    g.onUI('ghost-shot', (data) => {
+      if (data.mine) {
+        sfx.go();
+        buzz([100, 60, 100]);
+        this._banner('👻 LAST SHOT! Answer right to RISE!', 'info');
+        this._setAnswersEnabled(true);
+        this._startTimer(data.duration);
+      } else {
+        this._banner('👻 GHOST SHOT!', 'info');
+        toast('The fallen get one chance to rise from the clay…');
+      }
+    });
 
     g.onUI('round-end', ({ round, scores }) => {
       this._stopTimer();
@@ -482,6 +576,47 @@ export class GameUI {
     });
   }
 
+  // A duel question: same card, special chrome, only the duelist whose
+  // turn it is may answer, no timer.
+  _renderDuelQuestion({ q, duel, turnId, dNum }) {
+    const g = this.g;
+    this._stopTimer();
+    $('#verdict-banner').className = 'verdict-banner';
+    const turnName = g.playerName(turnId).toUpperCase();
+    $('#hud-round').textContent =
+      `⚔️ ${g.playerName(duel.a).toUpperCase()} vs ${g.playerName(duel.b).toUpperCase()} · 💰${duel.stake} · ${turnName}'S TURN`;
+    $('#q-category').textContent = q.category;
+    const diffEl = $('#q-difficulty');
+    diffEl.textContent = q.difficulty.toUpperCase();
+    diffEl.dataset.diff = q.difficulty;
+    $('#q-text').textContent = q.text;
+
+    $$('.answer-btn').forEach((btn, i) => {
+      btn.className = 'answer-btn';
+      btn.querySelector('.answer-text').textContent = q.answers[i] ?? '';
+      btn.querySelectorAll('.stamp-rail').forEach((s) => s.remove());
+      btn.disabled = true;
+    });
+
+    this._renderTimerIdle(null);
+    this._refreshShop();
+
+    if (turnId !== g.me.id && dNum === 0) {
+      toast(`⚔️ ${turnName} STEPS UP FIRST…`);
+    }
+    // Quick ⚔️ splash instead of the full 3-2-1.
+    this.countdownTimers.forEach(clearTimeout);
+    this.countdownTimers = [];
+    const overlay = $('#countdown-overlay');
+    const num = $('#countdown-num');
+    num.textContent = '⚔️';
+    num.style.animation = 'none';
+    void num.offsetWidth;
+    num.style.animation = '';
+    overlay.classList.add('show');
+    sfx.countdown();
+  }
+
   _setAnswersEnabled(on) {
     $$('.answer-btn').forEach((btn) => {
       if (on && (btn.classList.contains('zapped') || btn.classList.contains('picked'))) return;
@@ -578,6 +713,21 @@ export class GameUI {
       this._banner(data.reason === 'timeout' ? "TIME'S UP!" : 'NOBODY GOT IT!', 'info');
     }
 
+    // Ghost last-shot outcomes: stamp each ghost's attempt, celebrate
+    // the risen.
+    for (const [pid, idx] of Object.entries(data.ghostAnswers || {})) {
+      const kind = (data.ghostRevived || []).includes(pid) ? 'correct' : 'wrong';
+      this._stampAnswer(idx, pid, kind);
+    }
+    for (const id of data.ghostRevived || []) {
+      if (id === this.g.me.id) {
+        sfx.fanfare();
+        this._banner('👻 YOU RISE! +100', 'good');
+      } else {
+        toast(`👻 ${this.g.playerName(id).toUpperCase()} RISES FROM THE CLAY! +100`);
+      }
+    }
+
     for (const id of data.eliminated || []) {
       if (id === this.g.me.id) {
         sfx.womp();
@@ -671,7 +821,6 @@ export class GameUI {
   _refreshFxBadges() {
     const g = this.g;
     const mine = [];
-    if (g.myShield) mine.push('🛡️');
     if (g.myDouble) mine.push('✖️2');
     $('#hud-me-effects').innerHTML = mine.map((x) => `<span>${x}</span>`).join('');
   }
@@ -689,8 +838,11 @@ export class GameUI {
           <span class="pu-name">${def.name}</span>
           <span class="pu-desc">${def.desc}</span>
         </span>
-        <span class="pu-cost">${def.cost}</span>`;
-      btn.addEventListener('click', () => { this.g.buy(key); });
+        <span class="pu-cost">${def.costLabel ?? def.cost}</span>`;
+      btn.addEventListener('click', () => {
+        if (key === 'duel') this._openDuelModal();
+        else this.g.buy(key);
+      });
       wrap.appendChild(btn);
     }
   }
@@ -698,19 +850,45 @@ export class GameUI {
   _refreshShop() {
     const g = this.g;
     const myScore = g.scores[g.me.id] ?? 0;
+    const inDuel = !!(g.currentQ && g.currentQ.duel);
     $$('.powerup-btn').forEach((btn) => {
       const type = btn.dataset.type;
       const def = POWERUPS[type];
+      btn.style.display = def.royaleOnly && g.settings.mode !== 'royale' ? 'none' : '';
       const used = g.usedPowerupsThisQ.has(type);
       const timerless = type === 'timewarp' && !(g.settings.timer > 0);
-      const stacked = (type === 'shield' && g.myShield) || (type === 'double' && g.myDouble);
+      const stacked = type === 'double' && g.myDouble;
       btn.classList.toggle('used', used);
-      btn.disabled = used || stacked || timerless
+      btn.disabled = used || stacked || timerless || inDuel
         || myScore < def.cost
         || g.phase !== 'answering'
         || g.myAnswered || g.myLockedOut
         || g.eliminated.has(g.me.id);
     });
+  }
+
+  // ---------- duel ----------
+  _openDuelModal() {
+    const g = this.g;
+    const foes = g.others().filter((p) => !g.eliminated.has(p.id));
+    if (!foes.length) return;
+    const wrap = $('#duel-targets');
+    wrap.innerHTML = '';
+    foes.forEach((p, i) => {
+      const chip = document.createElement('button');
+      chip.className = `chip duel-target${i === 0 ? ' selected' : ''}`;
+      chip.dataset.pid = p.id;
+      chip.textContent = p.name.toUpperCase();
+      chip.addEventListener('click', () => {
+        wrap.querySelectorAll('.chip').forEach((c) => c.classList.remove('selected'));
+        chip.classList.add('selected');
+        sfx.click();
+      });
+      wrap.appendChild(chip);
+    });
+    // With a single opponent there's nothing to choose.
+    wrap.style.display = foes.length > 1 ? '' : 'none';
+    $('#duel-modal').showModal();
   }
 
   // ---------- scoreboard / confetti ----------

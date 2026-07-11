@@ -212,6 +212,21 @@
 
     <!-- toast + modal -->
     <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+    <dialog id="duel-modal" class="modal duel-modal">
+      <h3 class="help-heading">⚔️ DUEL!</h3>
+      <p class="duel-sub">Head-to-head, alternating solo questions, no timer. First miss loses — and pays the stake. Can't cover it? You're OUT.</p>
+      <div id="duel-targets" class="duel-targets"></div>
+      <div class="duel-stake-row">
+        <span class="setting-label">STAKE</span>
+        <input type="range" id="duel-stake" min="0" max="200" step="25" value="100">
+        <span id="duel-stake-val" class="pu-cost">100</span>
+      </div>
+      <div class="row-buttons">
+        <button id="btn-duel-go" class="btn btn-pink">FIGHT!</button>
+        <button id="btn-duel-cancel" class="btn btn-purple">NEVERMIND</button>
+      </div>
+    </dialog>
+
     <dialog id="help-modal" class="modal help-modal">
       <h3 class="help-heading">HOW TO PLAY</h3>
       <ul class="help-list">
@@ -219,6 +234,8 @@
         <li>💥 <b>Wrong answer: −50</b> and you're locked out of that question — and your pick is stamped on everyone's screen, so you've just eliminated an answer for your rivals.</li>
         <li>⏱️ Timer per question, rounds, and difficulty are set by the host. 10 questions per round. Most points at the end wins!</li>
         <li>👑 <b>ROYALE mode is endless:</b> everyone starts with 1000 points and antes into a pot each question (25, 50 or 100 — the host sets the pace) — the question winner takes the pot (it rolls over if nobody's right). Hit 0 and you're out, spectating. Last one standing wins. The ramp dial goes 1 (one fixed difficulty) to 5 (total chaos).</li>
+        <li>👻 <b>Ghost shot (Royale):</b> if every survivor gets a question wrong, the fallen get one chance to answer it — nail it and you RISE AGAIN with 100 points.</li>
+        <li>⚔️ <b>Duel (Royale):</b> challenge a foe and stake 0-200. You alternate solo untimed questions; the first miss loses and pays the stake. Can't cover it? You bust out.</li>
         <li>🛒 <b>Spend points on power-ups mid-question:</b></li>
       </ul>
       <ul class="help-list" id="help-powerups"></ul>

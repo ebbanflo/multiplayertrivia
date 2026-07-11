@@ -40,6 +40,13 @@ An endless, elimination-based alternative to the classic match:
   4 ramps but ~40% of questions go rogue, 5 is pure chaos.
 - Power-ups all work — costs come out of your survival stack, and
   Double Down doubles the pot you take.
+- **⚔️ Duel** (Royale-only power-up): challenge any living foe and stake
+  0-200. The two of you alternate solo, untimed questions — everyone else
+  watches — and the first miss loses. The stake is stolen from the loser;
+  if their stack can't cover it, they bust out of the game.
+- **👻 Ghost shot**: when every survivor answers a question wrong, the
+  eliminated get one shot at it. Any ghost who answers correctly rises
+  again with 100 points.
 
 ### Settings (chosen by the host)
 
@@ -61,8 +68,8 @@ Buy these mid-question with your points:
 | ➗ | 50/50 | 75 | Zap away two wrong answers |
 | 🧊 | Freeze | 100 | ALL your opponents can't answer for 5 seconds |
 | ⏰ | Time Warp | 75 | +15 seconds on *your* clock |
-| 🛡️ | Shield | 75 | No penalty on your next miss |
 | ✖️ | Double Down | 100 | 2× points on your next correct answer |
+| ⚔️ | Duel | stake 0-200 | Royale only: head-to-head, first miss pays the stake |
 
 ## Hosting on GitHub Pages
 

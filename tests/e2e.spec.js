@@ -55,6 +55,7 @@ const engineState = (page) => page.evaluate(() => {
     pot: e.pot,
     meEliminated: e.eliminated.has(e.me.id),
     eliminatedCount: e.eliminated.size,
+    ghostShot: e.ghostShotQKey,
   };
 });
 
@@ -179,14 +180,14 @@ test.describe('HMMM? two-player battle', () => {
     await clickAnswer(host, { correct: true });
     await waitForReveal(host);
 
-    // ---- Q5: host buys shield, answers wrong — no penalty ----
+    // ---- Q5: host whiffs for real (-50), guest steals ----
     await waitForAnswering(host, '1-4');
     await waitForAnswering(guest, '1-4');
-    const beforeShield = (await engineState(host)).myScore - 75; // cost deducted on buy
-    await host.click('.powerup-btn[data-type="shield"]');
+    const beforeMiss = (await engineState(host)).myScore;
     await clickAnswer(host, { correct: false });
-    await expect(host.locator('#verdict-banner')).toHaveText(/SHIELDED/);
-    expect((await engineState(host)).myScore).toBe(beforeShield); // no -50
+    await expect
+      .poll(async () => (await engineState(host)).myScore, { timeout: 10_000 })
+      .toBe(beforeMiss - 50);
     await clickAnswer(guest, { correct: true });
     await waitForReveal(guest);
     let gs = await engineState(guest);
@@ -454,6 +455,125 @@ test.describe('HMMM? two-player battle', () => {
     await waitForReveal(host);
     // two antes (-200), one wrong answer (-50), one giant pot (+400)
     expect((await engineState(host)).myScore).toBe(1150);
+  });
+
+  test('royale duel: alternating solo questions, loser pays or busts', async ({ context }) => {
+    await stubApis(context);
+    const host = await context.newPage();
+    await host.goto(`${APP}&rstart=150`);
+    await host.fill('#player-name', 'HOSTY');
+    await host.click('#btn-host');
+    await expect(host.locator('#room-code')).toHaveText(/^[A-Z0-9]{4}$/);
+    const code = (await host.locator('#room-code').textContent())?.trim();
+    const guest = await context.newPage();
+    await guest.goto(`${APP}&rstart=150`);
+    await guest.fill('#player-name', 'GUESTO');
+    await guest.click('#btn-join');
+    const boxes = guest.locator('.code-box');
+    for (let i = 0; i < 4; i++) await boxes.nth(i).fill(code[i]);
+    await guest.click('#btn-join-go');
+    await expect(host.locator('#lobby-players')).toContainText('GUESTO');
+    await host.click('[data-setting="mode"] .chip[data-value="royale"]');
+    await host.click('[data-setting="timer"] .chip[data-value="30"]');
+    await host.click('#btn-start');
+
+    // r-0: both at 125 after ante. Host challenges for a 200 stake.
+    await waitForAnswering(host, 'r-0');
+    await waitForAnswering(guest, 'r-0');
+    await host.click('.powerup-btn[data-type="duel"]');
+    await expect(host.locator('#duel-modal')).toBeVisible();
+    // single opponent: no target picker shown
+    await expect(host.locator('#duel-targets')).toBeHidden();
+    await host.locator('#duel-stake').evaluate((el) => {
+      el.value = '200';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await expect(host.locator('#duel-stake-val')).toHaveText('200');
+    await host.click('#btn-duel-go');
+    await expect(guest.locator('#toast-stack')).toContainText(/CHALLENGES/);
+
+    // the main question still plays out first
+    await clickAnswer(host, { correct: true }); // host takes pot -> 175
+    await waitForReveal(host);
+
+    // duel question 1: host's turn; guest can't touch anything
+    await waitForAnswering(host, 'd-0-0');
+    await waitForAnswering(guest, 'd-0-0');
+    expect(await guest.locator('.answer-btn:enabled').count()).toBe(0);
+    await expect(guest.locator('#hud-round')).toHaveText(/⚔️ .*HOSTY'S TURN/);
+    await clickAnswer(host, { correct: true });
+    await expect(host.locator('#verdict-banner')).toHaveText(/NAILS IT/);
+
+    // duel question 2: guest's turn; guest misses -> can't cover 200 -> busts
+    await waitForAnswering(guest, 'd-0-1');
+    expect(await host.locator('.answer-btn:enabled').count()).toBe(0);
+    await clickAnswer(guest, { correct: false });
+    await expect(host.locator('#verdict-banner')).toHaveText(/DUEL WON! \+125/);
+    await expect(host.locator('#screen-gameover')).toBeVisible({ timeout: 15_000 });
+    await expect(host.locator('#gameover-title')).toHaveText('LAST ONE STANDING!');
+    expect((await engineState(host)).myScore).toBe(300); // 175 + guest's whole 125
+    expect((await engineState(guest)).meEliminated).toBe(true);
+  });
+
+  test('royale ghost shot: the fallen rise on a question everyone misses', async ({ context }) => {
+    await stubApis(context);
+    const host = await context.newPage();
+    await host.goto(`${APP}&rstart=125`);
+    await host.fill('#player-name', 'HOSTY');
+    await host.click('#btn-host');
+    await expect(host.locator('#room-code')).toHaveText(/^[A-Z0-9]{4}$/);
+    const code = (await host.locator('#room-code').textContent())?.trim();
+    const join = async (name) => {
+      const p = await context.newPage();
+      await p.goto(`${APP}&rstart=125`);
+      await p.fill('#player-name', name);
+      await p.click('#btn-join');
+      const boxes = p.locator('.code-box');
+      for (let i = 0; i < 4; i++) await boxes.nth(i).fill(code[i]);
+      await p.click('#btn-join-go');
+      return p;
+    };
+    const guest = await join('GUESTO');
+    const p3 = await join('BLOBBY');
+    await expect(host.locator('#lobby-players')).toContainText('BLOBBY');
+    await host.click('[data-setting="mode"] .chip[data-value="royale"]');
+    await host.click('[data-setting="timer"] .chip[data-value="30"]');
+    await host.click('#btn-start');
+    const everyone = [host, guest, p3];
+
+    // r-0: BLOBBY whiffs (50), host takes the pot (175)
+    for (const p of everyone) await waitForAnswering(p, 'r-0');
+    await clickAnswer(p3, { correct: false });
+    await clickAnswer(host, { correct: true });
+    await waitForReveal(host);
+
+    // r-1: BLOBBY (25 after ante) whiffs to 0 -> eliminated
+    for (const p of everyone) await waitForAnswering(p, 'r-1');
+    await clickAnswer(p3, { correct: false });
+    await clickAnswer(host, { correct: true });
+    await waitForReveal(host);
+    await expect.poll(async () => (await engineState(p3)).meEliminated).toBe(true);
+
+    // r-2: BOTH live players whiff -> ghost shot opens for BLOBBY
+    for (const p of [host, guest]) await waitForAnswering(p, 'r-2');
+    await clickAnswer(host, { correct: false });
+    await clickAnswer(guest, { correct: false });
+    await p3.waitForFunction(() => window.__HMMM.engine.ghostShotQKey === 'r-2', undefined, { timeout: 10_000 });
+    await expect(p3.locator('#verdict-banner')).toHaveText(/LAST SHOT/);
+    expect(await p3.locator('.answer-btn:enabled').count()).toBeGreaterThan(0);
+    await clickAnswer(p3, { correct: true });
+
+    // BLOBBY rises with 100; the guest's busted stack stays dead
+    await expect.poll(async () => (await engineState(p3)).meEliminated, { timeout: 10_000 }).toBe(false);
+    expect((await engineState(p3)).myScore).toBe(100);
+    await expect.poll(async () => (await engineState(guest)).meEliminated).toBe(true);
+
+    // the game rolls on with host + revived BLOBBY anteing up
+    await waitForAnswering(p3, 'r-3');
+    expect(await p3.locator('.answer-btn:enabled').count()).toBe(4);
+    const s = await engineState(p3);
+    expect(s.myScore).toBe(75); // 100 - 25 ante
+    expect(s.pot).toBe(100);    // r-2's unclaimed pot rolled into fresh antes
   });
 
   test('four-player battle: multi-stamps, freeze-all, dropout, fifth rejected', async ({ context }) => {

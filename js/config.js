@@ -40,8 +40,13 @@ export const POWERUPS = {
   fifty:    { name: '50/50',       icon: '➗', cost: 75,  desc: 'Zap away two wrong answers' },
   freeze:   { name: 'FREEZE',      icon: '🧊', cost: 100, desc: 'Freeze ALL opponents for 5s' },
   timewarp: { name: 'TIME WARP',   icon: '⏰', cost: 75,  desc: '+15 seconds on YOUR clock' },
-  shield:   { name: 'SHIELD',      icon: '🛡️', cost: 75,  desc: 'No penalty on your next miss' },
   double:   { name: 'DOUBLE DOWN', icon: '✖️', cost: 100, desc: '2x points on your next correct answer' },
+  duel:     { name: 'DUEL', icon: '⚔️', cost: 0, costLabel: '0-200', royaleOnly: true,
+              desc: 'Challenge a foe: alternating solo questions, first miss pays the stake' },
 };
 export const FREEZE_MS = 5000;
 export const TIMEWARP_MS = 15000;
+
+export const DUEL_MAX_STAKE = 200;
+export const GHOST_SHOT_MS = 8000;    // window for the fallen to attempt a revival
+export const GHOST_REVIVE_POINTS = 100;
