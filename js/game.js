@@ -601,6 +601,18 @@ export class Game {
       else this.scores[winnerId] += winDelta;
     }
 
+    // Co-op: letting the clock die costs a heart too — no hiding behind
+    // the timer. (Wrong answers already paid theirs via the verdict.)
+    const timeoutHearts = [];
+    if (this.settings.mode === 'coop') {
+      for (const id of hq.timeups) {
+        if (!this.alive.has(id)) continue;
+        this.livesMap[id] = Math.max(0, (this.livesMap[id] || 0) - 1);
+        if (this.livesMap[id] === 0) this.alive.delete(id);
+        timeoutHearts.push(id);
+      }
+    }
+
     // Royale ghost shot: every living player answered WRONG, and there
     // are fallen players watching — they get one chance to resurrect
     // before the reveal.
@@ -614,10 +626,10 @@ export class Game {
       }
     }
 
-    this._finalizeQuestion(reason, winnerId, winDelta, doubled, null);
+    this._finalizeQuestion(reason, winnerId, winDelta, doubled, null, timeoutHearts);
   }
 
-  _finalizeQuestion(reason, winnerId, winDelta, doubled, ghostData) {
+  _finalizeQuestion(reason, winnerId, winDelta, doubled, ghostData, timeoutHearts = []) {
     const hq = this.hq;
     const royale = this.settings.mode === 'royale';
 
@@ -647,6 +659,7 @@ export class Game {
       lives: this.lives,
       teamScore: this.teamScore,
       livesMap: { ...this.livesMap },
+      timeoutHearts,
       eliminated,
       ghostRevived: ghostData ? ghostData.revived : [],
       ghostAnswers: ghostData ? ghostData.answers : {},
@@ -1174,7 +1187,13 @@ export class Game {
         this.phase = 'reveal';
         if (data.pot !== undefined) this.pot = data.pot;
         if (data.teamScore !== undefined) this.teamScore = data.teamScore;
-        if (data.livesMap) this.livesMap = { ...data.livesMap };
+        if (data.livesMap) {
+          this.livesMap = { ...data.livesMap };
+          // Co-op: timed-out players may have just lost their last heart.
+          for (const [id, n] of Object.entries(this.livesMap)) {
+            if (n === 0) this.eliminated.add(id);
+          }
+        }
         for (const id of data.ghostRevived || []) this.eliminated.delete(id);
         for (const id of data.eliminated || []) this.eliminated.add(id);
         this.ghostShotQKey = null;

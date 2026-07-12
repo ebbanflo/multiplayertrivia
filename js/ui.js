@@ -910,10 +910,24 @@ export class GameUI {
     } else if (royale) {
       sfx.womp();
       this._banner(`POT ROLLS OVER! 💰${data.pot}`, 'info');
+    } else if (this.g.settings.mode === 'coop' && (data.timeoutHearts || []).length) {
+      sfx.womp();
+      buzz([70, 50, 70]);
+      this._banner("⏰ TIME'S UP! -1 ❤️", 'bad');
+      for (const id of data.timeoutHearts) {
+        if ((this.g.livesMap[id] ?? 0) === 0) {
+          toast(id === this.g.me.id
+            ? "💀 You're down! Spectating…"
+            : `💀 ${this.g.playerName(id).toUpperCase()} IS DOWN!`);
+        }
+      }
+      this._setScores();
+      this._renderDeadMarks();
     } else {
       sfx.womp();
       this._banner(data.reason === 'timeout' ? "TIME'S UP!" : 'NOBODY GOT IT!', 'info');
     }
+    if (this.g.settings.mode === 'coop') this._setScores();
 
     // Ghost last-shot outcomes: stamp each ghost's attempt, celebrate
     // the risen.

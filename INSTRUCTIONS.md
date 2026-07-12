@@ -128,8 +128,11 @@ from `qPool` per difficulty, refilled in batches of 10
 ### Co-op (team vs the goal)
 One shared `teamScore` racing `settings.goal` (1000/5000/10000, 0 =
 endless). Per-player `livesMap` starts at `COOP_LIVES` (3). Wrong answer
-= −1 heart to that player, **never team points**; timeout costs nothing.
-0 hearts ⇒ spectate (`eliminated` set reused). Winner of a question banks
+= −1 heart to that player, **never team points**; letting your own clock
+expire ALSO costs a heart (applied at question resolution to everyone in
+`hq.timeups`, broadcast as `timeoutHearts` in `q-end`) — so stalling a
+full table costs the whole team hearts. 0 hearts ⇒ spectate
+(`eliminated` set reused). Winner of a question banks
 `100 + speedBonus` into `teamScore` (Double Down doubles it). Win: reach
 goal (everybody wins, confetti). Lose: all hearts gone. Power-ups spend
 from **teamScore**: 50/50, Double Down, and **Revive** (200): queued like

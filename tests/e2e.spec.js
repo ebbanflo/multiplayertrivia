@@ -714,6 +714,30 @@ test.describe('HMMM? two-player battle', () => {
     await expect(host.locator('#btn-rematch')).toHaveText('GO AGAIN!');
   });
 
+  test('co-op: a timed-out question costs everyone a heart, and can wipe the team', async ({ context }) => {
+    await stubApis(context);
+    const { host, guest } = await setupMatch(context, { timer: '10' });
+    await host.click('[data-setting="mode"] .chip[data-value="coop"]');
+    await host.click('[data-setting="goal"] .chip[data-value="0"]'); // endless
+    await host.click('#btn-start');
+
+    // Three questions of silence: hearts burn 3 -> 2 -> 1 -> 0
+    for (let i = 0; i <= 2; i++) {
+      await waitForAnswering(host, `c-${i}`);
+      await waitForAnswering(guest, `c-${i}`);
+      // nobody answers; the 10s clock does its work
+      await expect
+        .poll(async () => (await engineState(host)).myLives, { timeout: 25_000 })
+        .toBe(2 - i);
+      expect((await engineState(guest)).myLives).toBe(2 - i);
+      if (i === 0) await expect(host.locator('#verdict-banner')).toHaveText(/TIME'S UP! -1 ❤️/);
+    }
+
+    // full wipe by stalling: TEAM SQUASHED for everyone
+    await expect(host.locator('#gameover-title')).toHaveText('TEAM SQUASHED!', { timeout: 20_000 });
+    await expect(guest.locator('#gameover-title')).toHaveText('TEAM SQUASHED!');
+  });
+
   test('four-player battle: multi-stamps, freeze-all, dropout, fifth rejected', async ({ context }) => {
     await stubApis(context);
     const { host, guest, code } = await setupMatch(context, { timer: '30' });

@@ -56,8 +56,8 @@ sets (1K / 5K / 10K — or endless, to see how far the run goes):
 - Same question for everyone; the first correct answer banks
   **100 + speed bonus** into the team score.
 - Everyone has **3 lives**. A wrong answer costs *you* a heart — never
-  team points — and letting the clock run out costs nothing, so hold
-  your fire when unsure. At 0 hearts you spectate.
+  team points — and if your clock runs out, that costs a heart too, so
+  there's no hiding behind the timer. At 0 hearts you spectate.
 - **All hearts gone = team squashed.** Reach the goal = everybody wins.
 - Power-ups (bought from the *team* score): 50/50, Double Down, and
   **💚 Revive (200)** — after the current question, the buyer faces one
