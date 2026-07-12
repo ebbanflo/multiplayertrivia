@@ -48,6 +48,22 @@ An endless, elimination-based alternative to the classic match:
   eliminated get one shot at it. Any ghost who answers correctly rises
   again with 100 points.
 
+### Co-op mode 🤝
+
+2-4 players on one team, one shared score, racing to a **goal** the host
+sets (1K / 5K / 10K — or endless, to see how far the run goes):
+
+- Same question for everyone; the first correct answer banks
+  **100 + speed bonus** into the team score.
+- Everyone has **3 lives**. A wrong answer costs *you* a heart — never
+  team points — and letting the clock run out costs nothing, so hold
+  your fire when unsure. At 0 hearts you spectate.
+- **All hearts gone = team squashed.** Reach the goal = everybody wins.
+- Power-ups (bought from the *team* score): 50/50, Double Down, and
+  **💚 Revive (200)** — after the current question, the buyer faces one
+  untimed question alone; answer it right and they choose a fallen
+  teammate to return with 2 lives. Miss and the 200 is gone.
+
 ### Solo Run 🧍
 
 No friends online? **SOLO RUN** on the title screen skips the lobby
@@ -59,9 +75,10 @@ zero hearts you get your survival stats and a PLAY AGAIN button.
 
 | Setting | Options |
 |---|---|
-| Mode | Classic · **Royale ∞** |
+| Mode | Classic · **Royale ∞** · **Co-op 🤝** |
 | Difficulty (classic) | Easy · Medium · Hard · **Ramp Up!** (easy → hard across the game) |
-| Ramp dial (royale) | 1 static · 2 slow · 3 ramp · 4 wobbly · 5 chaos |
+| Ramp dial (royale/co-op) | 1 static · 2 slow · 3 ramp · 4 wobbly · 5 chaos |
+| Goal (co-op) | 1K · 5K · 10K · Endless |
 | Ante (royale) | 25 · 50 · 100 per question |
 | Timer | 10 sec · 30 sec · 1 min · No timer (classic only — Royale needs a clock) |
 | Rounds (classic) | 1 · 2 · 3 · 5 (10 questions each) |
@@ -77,6 +94,11 @@ Buy these mid-question with your points:
 | ⏰ | Time Warp | 75 | +15 seconds on *your* clock |
 | ✖️ | Double Down | 100 | 2× points on your next correct answer |
 | ⚔️ | Duel | stake 0-200 | Royale only: head-to-head, first miss pays the stake |
+| 💚 | Revive | 200 | Co-op only: answer one untimed question to bring a teammate back with 2 lives |
+
+Shop by mode — Classic: 50/50, Freeze, Time Warp, Double Down ·
+Royale: those plus Duel · Co-op: 50/50, Double Down, Revive (paid from
+the team score) · Solo: no shop.
 
 ## Hosting on GitHub Pages
 

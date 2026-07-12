@@ -4,7 +4,7 @@
 // Player colors are assigned by roster slot (host = 0), so every player
 // sees the same color for the same person.
 
-import { POWERUPS, FREEZE_MS, QUESTIONS_PER_ROUND, MAX_PLAYERS } from './config.js';
+import { POWERUPS, MODE_POWERUPS, FREEZE_MS, QUESTIONS_PER_ROUND, MAX_PLAYERS } from './config.js';
 import { sfx } from './audio.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -184,6 +184,13 @@ export class GameUI {
       $('#duel-stake-val').textContent = stakeInput.value;
     });
     $('#btn-duel-cancel').addEventListener('click', () => { sfx.click(); $('#duel-modal').close(); });
+    $('#btn-revive-pick').addEventListener('click', () => {
+      const sel = $('#revive-targets .chip.selected');
+      if (!sel) return;
+      sfx.go();
+      this.g.pickRevive(sel.dataset.pid);
+      $('#revive-modal').close();
+    });
     $('#btn-duel-go').addEventListener('click', () => {
       const sel = $('#duel-targets .chip.selected');
       if (!sel) return;
@@ -246,6 +253,7 @@ export class GameUI {
       if (solo) this._renderLives();
       else this._renderOthersHud();
       this._setScores();
+      this._refreshShop();
       this._renderDeadMarks();
       $('#hud-me-effects').innerHTML = '';
       $('#pause-overlay').hidden = true;
@@ -301,6 +309,11 @@ export class GameUI {
         if (g.settings.mode === 'solo') {
           this._renderLives();
           this._banner(g.lives > 0 ? `OUCH! ${g.lives} ❤️ LEFT` : '💀 OUT OF LIVES!', 'bad');
+        } else if (g.settings.mode === 'coop') {
+          const left = g.livesMap[g.me.id] ?? 0;
+          this._banner(left > 0 ? `OUCH! ${left} ❤️ LEFT` : "💀 YOU'RE DOWN!", 'bad');
+          this._setScores();
+          this._renderDeadMarks();
         } else {
           this._banner('WRONG!', 'bad');
         }
@@ -309,7 +322,14 @@ export class GameUI {
         // Show exactly which answer they whiffed on.
         sfx.steal();
         this._stampAnswer(data.idx, data.playerId, 'wrong');
-        toast(`${g.playerName(data.playerId).toUpperCase()} WHIFFED!`);
+        if (g.settings.mode === 'coop') {
+          const left = g.livesMap[data.playerId] ?? 0;
+          toast(`${g.playerName(data.playerId).toUpperCase()} ${left > 0 ? `WHIFFED! ${left} ❤️ left` : 'IS DOWN! 💀'}`);
+          this._setScores();
+          this._renderDeadMarks();
+        } else {
+          toast(`${g.playerName(data.playerId).toUpperCase()} WHIFFED!`);
+        }
       }
       this._refreshShop();
     });
@@ -405,6 +425,51 @@ export class GameUI {
       this._refreshShop();
     });
 
+    // ---- co-op revive ----
+    g.onUI('revive-q', (data) => this._renderReviveQuestion(data));
+
+    g.onUI('revive-unlocked', ({ buyerId }) => {
+      $('#countdown-overlay').classList.remove('show');
+      if (buyerId === g.me.id) {
+        this._setAnswersEnabled(true);
+        sfx.go();
+      }
+    });
+
+    g.onUI('revive-result', (data) => {
+      this._setAnswersEnabled(false);
+      if (data.canceled) {
+        toast('💚 Revive called off — 200 refunded to the team.');
+        return;
+      }
+      const btns = $$('.answer-btn');
+      const correctIdx = g.currentQ && g.currentQ.q ? g.currentQ.q.correctIndex : null;
+      if (data.correct) {
+        sfx.correct();
+        if (correctIdx !== null) btns[correctIdx].classList.add('correct-reveal');
+        this._banner('💚 REVIVE EARNED!', 'good');
+        if (data.buyerId === g.me.id && data.deadIds.length > 1) {
+          this._openRevivePicker(data.deadIds);
+        }
+      } else {
+        sfx.wrong();
+        if (btns[data.idx]) btns[data.idx].classList.add('wrong-reveal');
+        if (correctIdx !== null) {
+          btns[correctIdx].classList.add('correct-reveal');
+          btns.forEach((b, i) => { if (i !== correctIdx) b.classList.add('dimmed'); });
+        }
+        this._banner('💔 REVIVE FAILED!', 'bad');
+      }
+    });
+
+    g.onUI('revive-done', ({ targetId }) => {
+      sfx.fanfare();
+      toast(`💚 ${g.playerName(targetId).toUpperCase()} IS BACK WITH 2 ❤️!`);
+      if (targetId === g.me.id) this._banner('💚 YOU LIVE AGAIN!', 'good');
+      this._setScores();
+      this._renderDeadMarks();
+    });
+
     // ---- ghost last shot ----
     g.onUI('ghost-shot', (data) => {
       if (data.mine) {
@@ -449,6 +514,23 @@ export class GameUI {
         this._renderBoard($('#final-board'), scores, []);
         showScreen('screen-gameover');
         sfx.womp();
+        return;
+      }
+      if (g.settings.mode === 'coop') {
+        const victory = data.coop && data.coop.victory;
+        const questions = data.coop ? data.coop.questions : 0;
+        $('#gameover-title').textContent = victory ? 'GOAL SMASHED!' : 'TEAM SQUASHED!';
+        $('#gameover-status').textContent =
+          `The team banked ⭐${data.teamScore} over ${questions} question${questions === 1 ? '' : 's'}!`;
+        $('#btn-rematch').textContent = 'GO AGAIN!';
+        $('#final-board').innerHTML = `
+          <div class="score-card${victory ? ' leader' : ''}">
+            <span class="sc-crown">${victory ? '👑' : '💀'}</span>
+            <span class="sc-name">THE TEAM</span>
+            <span class="sc-points">⭐${data.teamScore}</span>
+          </div>`;
+        showScreen('screen-gameover');
+        if (victory) { sfx.fanfare(); this._confetti(); } else { sfx.womp(); }
         return;
       }
       $('#btn-rematch').textContent = 'REMATCH!';
@@ -508,13 +590,15 @@ export class GameUI {
 
     $('#settings-panel').classList.toggle('readonly', v.me.role !== 'host');
     const royale = v.settings.mode === 'royale';
+    const coop = v.settings.mode === 'coop';
     const groupVisible = {
       mode: true,
-      difficulty: !royale,
-      rounds: !royale,
-      ramp: royale,
-      staticDiff: royale && v.settings.ramp === 1,
+      difficulty: !royale && !coop,
+      rounds: !royale && !coop,
+      ramp: royale || coop,
+      staticDiff: (royale || coop) && v.settings.ramp === 1,
       ante: royale,
+      goal: coop,
       timer: true,
     };
     $$('#settings-panel .setting-group').forEach((group) => {
@@ -545,6 +629,16 @@ export class GameUI {
   }
 
   // ---------- HUD ----------
+  _coopHeader(qNum) {
+    const g = this.g;
+    const goal = g.settings.goal > 0 ? `/${g.settings.goal}` : ' · ENDLESS';
+    return `CO-OP 🤝 · Q${qNum ?? this.lastQNum ?? 1} · ⭐${g.teamScore}${goal}`;
+  }
+
+  _hearts(n) {
+    return '❤️'.repeat(Math.max(0, n)) + '🖤'.repeat(Math.max(0, 3 - n));
+  }
+
   // Solo: opponents' spot shows your hearts instead.
   _renderLives() {
     const lives = Math.max(0, this.g.lives);
@@ -577,9 +671,12 @@ export class GameUI {
     $('#verdict-banner').className = 'verdict-banner';
     $('#hud-round').textContent = mode === 'royale'
       ? `ROYALE ∞ · Q${qNum} · 💰${pot}`
-      : mode === 'solo'
-        ? `SOLO ∞ · Q${qNum}`
-        : `R${round}/${totalRounds} · Q${qIndex + 1}/${QUESTIONS_PER_ROUND}`;
+      : mode === 'coop'
+        ? this._coopHeader(qNum)
+        : mode === 'solo'
+          ? `SOLO ∞ · Q${qNum}`
+          : `R${round}/${totalRounds} · Q${qIndex + 1}/${QUESTIONS_PER_ROUND}`;
+    if (mode === 'coop') this.lastQNum = qNum;
     $('#q-category').textContent = q.category;
     const diffEl = $('#q-difficulty');
     diffEl.textContent = q.difficulty.toUpperCase();
@@ -658,6 +755,57 @@ export class GameUI {
     num.style.animation = '';
     overlay.classList.add('show');
     sfx.countdown();
+  }
+
+  // Co-op revive question: buyer answers alone, untimed, all watch.
+  _renderReviveQuestion({ q, buyerId }) {
+    const g = this.g;
+    this._stopTimer();
+    $('#verdict-banner').className = 'verdict-banner';
+    $('#hud-round').textContent = `💚 REVIVE · ${g.playerName(buyerId).toUpperCase()}'S REDEMPTION`;
+    $('#q-category').textContent = q.category;
+    const diffEl = $('#q-difficulty');
+    diffEl.textContent = q.difficulty.toUpperCase();
+    diffEl.dataset.diff = q.difficulty;
+    $('#q-text').textContent = q.text;
+    $$('.answer-btn').forEach((btn, i) => {
+      btn.className = 'answer-btn';
+      btn.querySelector('.answer-text').textContent = q.answers[i] ?? '';
+      btn.querySelectorAll('.stamp-rail').forEach((s) => s.remove());
+      btn.disabled = true;
+    });
+    this._renderTimerIdle(null);
+    this._refreshShop();
+    if (buyerId !== g.me.id) toast(`💚 ${g.playerName(buyerId).toUpperCase()} ANSWERS FOR A LIFE…`);
+    this.countdownTimers.forEach(clearTimeout);
+    this.countdownTimers = [];
+    const overlay = $('#countdown-overlay');
+    const num = $('#countdown-num');
+    num.textContent = '💚';
+    num.style.animation = 'none';
+    void num.offsetWidth;
+    num.style.animation = '';
+    overlay.classList.add('show');
+    sfx.countdown();
+  }
+
+  _openRevivePicker(deadIds) {
+    const g = this.g;
+    const wrap = $('#revive-targets');
+    wrap.innerHTML = '';
+    deadIds.forEach((id, i) => {
+      const chip = document.createElement('button');
+      chip.className = `chip${i === 0 ? ' selected' : ''}`;
+      chip.dataset.pid = id;
+      chip.textContent = g.playerName(id).toUpperCase();
+      chip.addEventListener('click', () => {
+        wrap.querySelectorAll('.chip').forEach((c) => c.classList.remove('selected'));
+        chip.classList.add('selected');
+        sfx.click();
+      });
+      wrap.appendChild(chip);
+    });
+    $('#revive-modal').showModal();
   }
 
   _setAnswersEnabled(on) {
@@ -739,7 +887,14 @@ export class GameUI {
     this._refreshFxBadges();
     const royale = this.g.settings.mode === 'royale';
 
-    if (data.winnerId === this.g.me.id) {
+    if (this.g.settings.mode === 'coop' && data.winnerId) {
+      // Any teammate's win is everyone's win.
+      sfx.correct();
+      this._stampAnswer(data.correctIndex, data.winnerId, 'correct');
+      const who = data.winnerId === this.g.me.id ? 'YOU' : this.g.playerName(data.winnerId).toUpperCase();
+      this._banner(`${who} +${data.winDelta} TEAM ⭐!`, 'good');
+      this._setScores({ team: data.winDelta });
+    } else if (data.winnerId === this.g.me.id) {
       sfx.correct();
       const label = royale ? `💰 +${data.winDelta} POT!` : `+${data.winDelta}!`;
       this._banner(data.doubled ? `✖️2 ${label}!` : label, 'good');
@@ -847,19 +1002,24 @@ export class GameUI {
   // ---------- scores / badges / shop ----------
   _setScores(deltas) {
     const g = this.g;
+    const coop = g.settings.mode === 'coop';
     const meEl = $('#hud-me-score');
-    meEl.textContent = g.scores[g.me.id] ?? 0;
+    // Co-op: player cards show hearts, the shared score lives in the header.
+    meEl.textContent = coop ? this._hearts(g.livesMap[g.me.id] ?? 0) : (g.scores[g.me.id] ?? 0);
     const anchors = { [g.me.id]: meEl };
     for (const chip of $$('#hud-others .hud-mini')) {
       const scoreEl = chip.querySelector('[data-score]');
-      scoreEl.textContent = g.scores[chip.dataset.pid] ?? 0;
+      scoreEl.textContent = coop
+        ? this._hearts(g.livesMap[chip.dataset.pid] ?? 0)
+        : (g.scores[chip.dataset.pid] ?? 0);
       anchors[chip.dataset.pid] = scoreEl;
     }
+    if (coop) $('#hud-round').textContent = this._coopHeader();
     if (deltas) {
       for (const [pid, d] of Object.entries(deltas)) {
-        const el = anchors[pid];
+        const el = coop ? $('#hud-round') : anchors[pid];
         if (!el) continue;
-        bumpScore(el, d >= 0);
+        if (!coop) bumpScore(el, d >= 0);
         scorePop(el, d);
       }
     }
@@ -896,18 +1056,21 @@ export class GameUI {
 
   _refreshShop() {
     const g = this.g;
-    const myScore = g.scores[g.me.id] ?? 0;
-    const inDuel = !!(g.currentQ && g.currentQ.duel);
+    const mode = g.settings.mode;
+    const wallet = mode === 'coop' ? g.teamScore : (g.scores[g.me.id] ?? 0);
+    const inSideQuest = !!(g.currentQ && (g.currentQ.duel || g.currentQ.revive));
+    const hasFallen = g.roster.some((p) => g.eliminated.has(p.id));
     $$('.powerup-btn').forEach((btn) => {
       const type = btn.dataset.type;
       const def = POWERUPS[type];
-      btn.style.display = def.royaleOnly && g.settings.mode !== 'royale' ? 'none' : '';
+      btn.style.display = MODE_POWERUPS[mode].includes(type) ? '' : 'none';
       const used = g.usedPowerupsThisQ.has(type);
       const timerless = type === 'timewarp' && !(g.settings.timer > 0);
       const stacked = type === 'double' && g.myDouble;
+      const noTarget = type === 'revive' && !hasFallen;
       btn.classList.toggle('used', used);
-      btn.disabled = used || stacked || timerless || inDuel
-        || myScore < def.cost
+      btn.disabled = used || stacked || timerless || inSideQuest || noTarget
+        || wallet < def.cost
         || g.phase !== 'answering'
         || g.myAnswered || g.myLockedOut
         || g.eliminated.has(g.me.id);

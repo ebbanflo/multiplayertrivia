@@ -56,6 +56,8 @@ const engineState = (page) => page.evaluate(() => {
     meEliminated: e.eliminated.has(e.me.id),
     eliminatedCount: e.eliminated.size,
     ghostShot: e.ghostShotQKey,
+    teamScore: e.teamScore,
+    myLives: e.livesMap ? e.livesMap[e.me.id] : null,
   };
 });
 
@@ -635,6 +637,81 @@ test.describe('HMMM? two-player battle', () => {
     const s = await engineState(p3);
     expect(s.myScore).toBe(75); // 100 - 25 ante
     expect(s.pot).toBe(100);    // r-2's unclaimed pot rolled into fresh antes
+  });
+
+  test('co-op: team score, hearts, revive, goal victory', async ({ context }) => {
+    await stubApis(context);
+    const { host, guest, code } = await setupMatch(context, { timer: '30' });
+    const p3 = await joinAs(context, code, 'BLOBBY');
+    await expect(host.locator('#lobby-players')).toContainText('BLOBBY');
+
+    // co-op lobby: goal + ramp shown; rounds/difficulty/ante hidden
+    await host.click('[data-setting="mode"] .chip[data-value="coop"]');
+    await expect(host.locator('[data-group="goal"]')).toBeVisible();
+    await expect(host.locator('[data-group="ramp"]')).toBeVisible();
+    await expect(host.locator('[data-group="rounds"]')).toBeHidden();
+    await expect(host.locator('[data-group="ante"]')).toBeHidden();
+    await host.click('[data-setting="goal"] .chip[data-value="1000"]');
+    await expect(guest.locator('[data-setting="goal"] .chip[data-value="1000"]')).toHaveClass(/selected/);
+    await host.click('#btn-start');
+    const everyone = [host, guest, p3];
+
+    // shared header + hearts; shop pruned to 50/50, double, revive
+    for (const p of everyone) await waitForAnswering(p, 'c-0');
+    await expect(host.locator('#hud-round')).toHaveText(/CO-OP 🤝 · Q1 · ⭐0\/1000/);
+    await expect(host.locator('#hud-me-score')).toHaveText('❤️❤️❤️');
+    await expect(host.locator('.powerup-btn[data-type="freeze"]')).toBeHidden();
+    await expect(host.locator('.powerup-btn[data-type="duel"]')).toBeHidden();
+    await expect(host.locator('.powerup-btn[data-type="revive"]')).toBeVisible();
+
+    // c-0..c-2: BLOBBY burns three hearts; host banks three wins
+    for (let i = 0; i <= 2; i++) {
+      await clickAnswer(p3, { correct: false });
+      await expect.poll(async () => (await engineState(p3)).myLives).toBe(2 - i);
+      await clickAnswer(host, { correct: true });
+      await waitForReveal(host);
+      if (i < 2) for (const p of everyone) await waitForAnswering(p, `c-${i + 1}`);
+    }
+    await expect.poll(async () => (await engineState(p3)).meEliminated).toBe(true);
+    let s = await engineState(host);
+    expect(s.teamScore).toBeGreaterThanOrEqual(550);
+
+    // c-3: guest buys REVIVE from the team wallet, then wins the question
+    for (const p of everyone) await waitForAnswering(p, 'c-3');
+    const beforeBuy = (await engineState(guest)).teamScore;
+    await guest.click('.powerup-btn[data-type="revive"]');
+    await expect.poll(async () => (await engineState(guest)).teamScore).toBe(beforeBuy - 200);
+    await clickAnswer(guest, { correct: true });
+    await waitForReveal(guest);
+
+    // revive question: only the buyer may answer; success auto-revives BLOBBY
+    await waitForAnswering(guest, 'v-3');
+    expect(await host.locator('.answer-btn:enabled').count()).toBe(0);
+    await expect(host.locator('#hud-round')).toHaveText(/💚 REVIVE · GUESTO'S REDEMPTION/);
+    await clickAnswer(guest, { correct: true });
+    await expect.poll(async () => (await engineState(p3)).meEliminated, { timeout: 10_000 }).toBe(false);
+    expect((await engineState(p3)).myLives).toBe(2);
+
+    // revived BLOBBY is back in the fight
+    for (const p of everyone) await waitForAnswering(p, 'c-4');
+    expect(await p3.locator('.answer-btn:enabled').count()).toBe(4);
+
+    // grind to the 1000 goal — everyone celebrates
+    for (let i = 4; i <= 8; i++) {
+      const st = await engineState(host);
+      if (st.phase === 'gameover') break;
+      await waitForAnswering(host, `c-${i}`).catch(() => {});
+      const now = await engineState(host);
+      if (now.phase === 'gameover') break;
+      if (now.qKey !== `c-${i}`) continue;
+      await clickAnswer(host, { correct: true });
+      await waitForReveal(host);
+    }
+    for (const p of everyone) {
+      await expect(p.locator('#gameover-title')).toHaveText('GOAL SMASHED!', { timeout: 20_000 });
+    }
+    await expect(host.locator('#final-board')).toContainText('THE TEAM');
+    await expect(host.locator('#btn-rematch')).toHaveText('GO AGAIN!');
   });
 
   test('four-player battle: multi-stamps, freeze-all, dropout, fifth rejected', async ({ context }) => {

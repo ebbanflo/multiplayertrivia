@@ -41,9 +41,23 @@ export const POWERUPS = {
   freeze:   { name: 'FREEZE',      icon: '🧊', cost: 100, desc: 'Freeze ALL opponents for 5s' },
   timewarp: { name: 'TIME WARP',   icon: '⏰', cost: 75,  desc: '+15 seconds on YOUR clock' },
   double:   { name: 'DOUBLE DOWN', icon: '✖️', cost: 100, desc: '2x points on your next correct answer' },
-  duel:     { name: 'DUEL', icon: '⚔️', cost: 0, costLabel: '0-200', royaleOnly: true,
+  duel:     { name: 'DUEL', icon: '⚔️', cost: 0, costLabel: '0-200',
               desc: 'Challenge a foe: alternating solo questions, first miss pays the stake' },
+  revive:   { name: 'REVIVE', icon: '💚', cost: 200,
+              desc: 'Answer one untimed question to bring a fallen teammate back with 2 lives' },
 };
+
+// Which power-ups appear in the shop, per mode (solo has no shop).
+export const MODE_POWERUPS = {
+  classic: ['fifty', 'freeze', 'timewarp', 'double'],
+  royale:  ['fifty', 'freeze', 'timewarp', 'double', 'duel'],
+  coop:    ['fifty', 'double', 'revive'],
+  solo:    [],
+};
+
+export const COOP_LIVES = 3;
+export const COOP_REVIVE_LIVES = 2;
+export const REVIVE_PICK_MS = 15000; // auto-pick if the buyer dawdles
 export const FREEZE_MS = 5000;
 export const TIMEWARP_MS = 15000;
 

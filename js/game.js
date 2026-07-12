@@ -16,6 +16,7 @@ import {
   POWERUPS, FREEZE_MS, TIMEWARP_MS, MAX_PLAYERS,
   ROYALE_START, ROYALE_ANTE, SOLO_LIVES,
   DUEL_MAX_STAKE, GHOST_SHOT_MS, GHOST_REVIVE_POINTS,
+  MODE_POWERUPS, COOP_LIVES, COOP_REVIVE_LIVES, REVIVE_PICK_MS,
 } from './config.js';
 import { buildQuestionSet, fetchDifficulty, royaleDifficulty } from './questions.js';
 
@@ -30,7 +31,7 @@ export class Game {
     this.hostPresent = this.isHost;
     this.settings = {
       mode: 'classic', difficulty: 'medium', timer: 60, rounds: 1,
-      ramp: 3, staticDiff: 'medium', ante: ROYALE_ANTE,
+      ramp: 3, staticDiff: 'medium', ante: ROYALE_ANTE, goal: 5000,
     };
     this.phase = 'lobby';            // lobby|countdown|answering|reveal|intermission|gameover
     this.scores = {};                // playerId -> score
@@ -52,6 +53,10 @@ export class Game {
     this.ghostShotQKey = null;       // set while a last-shot window is open
     this.ghostAnswered = false;
 
+    // Co-op mode client state (mirrored from host events)
+    this.teamScore = 0;
+    this.livesMap = {};              // playerId -> hearts remaining
+
     // Host-only state
     this.questions = [];
     this.qIndex = -1;
@@ -66,6 +71,8 @@ export class Game {
     this.duel = null;                // royale: active duel { a, b, stake, turn, dNum, q, qKey }
     this.ghost = null;               // royale: open last-shot window state
     this.lives = SOLO_LIVES;         // solo: hearts remaining
+    this.pendingRevive = null;       // coop: { buyerId } queued for after this question
+    this.reviveQ = null;             // coop: active revive attempt state
 
     this._wire();
   }
@@ -101,6 +108,7 @@ export class Game {
       'game-end', 'rematch-vote', 'player-left', 'quit', 'royale-ante',
       'duel-request', 'duel-pending', 'duel-q', 'duel-answer', 'duel-verdict',
       'duel-end', 'ghost-shot', 'ghost-answer',
+      'revive-q', 'revive-answer', 'revive-result', 'revive-pick', 'revive-done',
     ];
     for (const type of types) {
       this.t.on(type, ({ from, data }) => this._handle(type, from, data));
@@ -206,6 +214,28 @@ export class Game {
       this._clearHostTimers();
       this._royaleGameEnd();
     }
+    // Co-op: cancel a revive whose buyer walked; wipe check if the last
+    // living teammate left.
+    if (this.settings.mode === 'coop') {
+      if (this.pendingRevive && this.pendingRevive.buyerId === id) {
+        this.pendingRevive = null;
+        this.teamScore += POWERUPS.revive.cost;
+      }
+      if (this.reviveQ && this.reviveQ.buyerId === id) {
+        this.reviveQ = null;
+        this.emit('revive-result', { canceled: true, buyerId: id, correct: false, teamScore: this.teamScore });
+        this._after(1200, () => this._coopNextQuestion());
+      }
+      if (this.phase !== 'gameover' && this.phase !== 'lobby'
+          && this.alive.size === 0 && (!this.hq || this.hq.resolved)) {
+        this._clearHostTimers();
+        this.phase = 'gameover';
+        this.emit('game-end', {
+          scores: { ...this.scores }, winnerIds: [], teamScore: this.teamScore,
+          coop: { victory: false, questions: this.qIndex + 1 },
+        });
+      }
+    }
   }
 
   lobbyView() {
@@ -247,11 +277,12 @@ export class Game {
       return;
     }
     if (!this.isHost || this.roster.length < 2) return;
-    const royale = this.settings.mode === 'royale';
+    const mode = this.settings.mode;
+    const endless = mode === 'royale' || mode === 'coop';
     this.ui('loading', { on: true });
     try {
-      if (royale) {
-        // Endless mode: pre-warm the pool for the opening difficulty;
+      if (endless) {
+        // Endless modes: pre-warm the pool for the opening difficulty;
         // later batches are fetched as the game runs.
         this.qPool = { easy: [], medium: [], hard: [] };
         const first = royaleDifficulty(0, this.settings.ramp, this.settings.staticDiff);
@@ -269,17 +300,56 @@ export class Game {
     this.scores = {};
     this.fx = {};
     this.pot = 0;
+    this.teamScore = 0;
+    this.livesMap = {};
     this.pendingDuel = null;
     this.duel = null;
     this.ghost = null;
+    this.pendingRevive = null;
+    this.reviveQ = null;
+    this.eliminated = new Set();
     this.alive = new Set(this.roster.map((p) => p.id));
     for (const p of this.roster) {
-      this.scores[p.id] = royale ? ROYALE_START : 0;
+      this.scores[p.id] = mode === 'royale' ? ROYALE_START : 0;
+      this.livesMap[p.id] = COOP_LIVES;
       this.fx[p.id] = {};
     }
     this.rematchVotes.clear();
-    this.emit('start-game', { settings: this.settings, roster: this.roster, scores: this.scores });
-    this._after(600, () => (royale ? this._royaleNextQuestion() : this._nextQuestion()));
+    this.emit('start-game', {
+      settings: this.settings, roster: this.roster, scores: this.scores,
+      teamScore: this.teamScore, livesMap: { ...this.livesMap },
+    });
+    this._after(600, () => {
+      if (mode === 'royale') this._royaleNextQuestion();
+      else if (mode === 'coop') this._coopNextQuestion();
+      else this._nextQuestion();
+    });
+  }
+
+  // ---------------- host: co-op flow ----------------
+  // The team races a shared score to the goal; each player has hearts.
+  async _coopNextQuestion() {
+    this.qIndex += 1;
+    const diff = royaleDifficulty(this.qIndex, this.settings.ramp, this.settings.staticDiff);
+    const q = await this._drawQuestion(diff);
+    const qKey = `c-${this.qIndex}`;
+    this.hq = {
+      qKey,
+      q,
+      active: new Set(this.alive),
+      answers: new Map(),
+      lockedOut: new Set(),
+      timeups: new Set(),
+      resolved: false,
+      candidates: [],
+      graceTimer: null,
+    };
+    this.emit('question', {
+      qKey, mode: 'coop', qNum: this.qIndex + 1, q,
+      duration: this.settings.timer > 0 ? this.settings.timer * 1000 : null,
+      teamScore: this.teamScore, goal: this.settings.goal,
+      livesMap: { ...this.livesMap },
+    });
   }
 
   _nextQuestion() {
@@ -465,6 +535,10 @@ export class Game {
       if (this.settings.mode === 'solo') {
         delta = 0; // solo misses cost a heart, not points
         this.lives -= 1;
+      } else if (this.settings.mode === 'coop') {
+        delta = 0; // coop misses cost the PLAYER a heart, never the team
+        this.livesMap[playerId] = Math.max(0, (this.livesMap[playerId] || 0) - 1);
+        if (this.livesMap[playerId] === 0) this.alive.delete(playerId);
       }
       this.scores[playerId] += delta;
       if (this.settings.mode === 'royale' && this.scores[playerId] < 0) {
@@ -472,6 +546,7 @@ export class Game {
       }
       this.emit('verdict', {
         qKey, playerId, idx, correct: false, delta, lives: this.lives,
+        livesMap: { ...this.livesMap },
         scores: { ...this.scores },
       });
       this._maybeResolve();
@@ -522,7 +597,8 @@ export class Game {
         winDelta = SCORE_BASE + this._speedBonus(w.elapsed, duration);
       }
       if (fx.double) { winDelta *= 2; doubled = true; fx.double = false; }
-      this.scores[winnerId] += winDelta;
+      if (this.settings.mode === 'coop') this.teamScore += winDelta;
+      else this.scores[winnerId] += winDelta;
     }
 
     // Royale ghost shot: every living player answered WRONG, and there
@@ -569,6 +645,8 @@ export class Game {
       reason,
       pot: this.pot,
       lives: this.lives,
+      teamScore: this.teamScore,
+      livesMap: { ...this.livesMap },
       eliminated,
       ghostRevived: ghostData ? ghostData.revived : [],
       ghostAnswers: ghostData ? ghostData.answers : {},
@@ -576,7 +654,28 @@ export class Game {
     });
 
     this._after(REVEAL_MS, () => {
-      if (this.settings.mode === 'solo') {
+      if (this.settings.mode === 'coop') {
+        const goal = this.settings.goal;
+        if (goal > 0 && this.teamScore >= goal) {
+          this.phase = 'gameover';
+          this.emit('game-end', {
+            scores: { ...this.scores }, winnerIds: this.roster.map((p) => p.id),
+            teamScore: this.teamScore,
+            coop: { victory: true, questions: this.qIndex + 1 },
+          });
+        } else if (this.alive.size === 0) {
+          this.phase = 'gameover';
+          this.emit('game-end', {
+            scores: { ...this.scores }, winnerIds: [],
+            teamScore: this.teamScore,
+            coop: { victory: false, questions: this.qIndex + 1 },
+          });
+        } else if (this.pendingRevive) {
+          this._startRevive();
+        } else {
+          this._coopNextQuestion();
+        }
+      } else if (this.settings.mode === 'solo') {
         if (this.lives <= 0) {
           this.phase = 'gameover';
           this.emit('game-end', {
@@ -751,20 +850,98 @@ export class Game {
     if (hq.lockedOut.has(playerId) || hq.answers.has(playerId)) return;
     if (type === 'timewarp' && !(this.settings.timer > 0)) return;
     if (type === 'duel') return; // duels go through duel-request
+    const mode = this.settings.mode;
+    if (!MODE_POWERUPS[mode].includes(type)) return;
     const fx = this.fx[playerId] = this.fx[playerId] || {};
     fx.usedThisQ = fx.usedThisQ && fx.usedThisQKey === qKey ? fx.usedThisQ : new Set();
     fx.usedThisQKey = qKey;
     if (fx.usedThisQ.has(type)) return;
     if (type === 'double' && fx.double) return;
-    if (this.scores[playerId] < def.cost) return;
 
-    this.scores[playerId] -= def.cost;
-    fx.usedThisQ.add(type);
+    // Co-op spends from the shared team score.
+    const wallet = mode === 'coop' ? this.teamScore : this.scores[playerId];
+    if (wallet < def.cost) return;
+
+    if (type === 'revive') {
+      // Needs a fallen teammate and no revive already brewing.
+      if (this.pendingRevive || this.reviveQ) return;
+      if (!this.roster.some((p) => !this.alive.has(p.id))) return;
+      this.pendingRevive = { buyerId: playerId };
+    }
     if (type === 'double') fx.double = true;
+    fx.usedThisQ.add(type);
+    if (mode === 'coop') this.teamScore -= def.cost;
+    else this.scores[playerId] -= def.cost;
 
     this.emit('powerup-applied', {
-      qKey, playerId, type, cost: def.cost, scores: { ...this.scores },
+      qKey, playerId, type, cost: def.cost,
+      teamScore: this.teamScore, scores: { ...this.scores },
     });
+  }
+
+  // ---------------- host: co-op revive ----------------
+  async _startRevive() {
+    const r = this.pendingRevive;
+    this.pendingRevive = null;
+    // The buyer fell before their moment — refund the team.
+    if (!r || !this.alive.has(r.buyerId)) {
+      this.teamScore += POWERUPS.revive.cost;
+      this.emit('revive-result', {
+        canceled: true, buyerId: r && r.buyerId, correct: false,
+        teamScore: this.teamScore,
+      });
+      this._after(1200, () => this._coopNextQuestion());
+      return;
+    }
+    const diff = royaleDifficulty(this.qIndex, this.settings.ramp, this.settings.staticDiff);
+    this.reviveQ = {
+      buyerId: r.buyerId,
+      q: await this._drawQuestion(diff),
+      qKey: `v-${this.qIndex}`,
+      awaitingPick: false,
+    };
+    this.emit('revive-q', {
+      qKey: this.reviveQ.qKey, q: this.reviveQ.q, buyerId: r.buyerId,
+    });
+  }
+
+  _hostOnReviveAnswer(playerId, { qKey, idx }) {
+    const rq = this.reviveQ;
+    if (!rq || rq.qKey !== qKey || rq.buyerId !== playerId || rq.awaitingPick) return;
+    const correct = idx === rq.q.correctIndex;
+    const deadIds = this.roster.filter((p) => !this.alive.has(p.id)).map((p) => p.id);
+    this.emit('revive-result', {
+      qKey, buyerId: playerId, idx, correct, deadIds, teamScore: this.teamScore,
+    });
+    if (!correct) {
+      this.reviveQ = null;
+      this._after(REVEAL_MS, () => this._coopNextQuestion());
+      return;
+    }
+    if (deadIds.length === 1) {
+      this._applyRevive(deadIds[0]);
+    } else {
+      // The buyer chooses; auto-pick if they dither.
+      rq.awaitingPick = true;
+      this._after(REVIVE_PICK_MS, () => {
+        if (this.reviveQ === rq && rq.awaitingPick) this._applyRevive(deadIds[0]);
+      });
+    }
+  }
+
+  _hostOnRevivePick(playerId, { targetId }) {
+    const rq = this.reviveQ;
+    if (!rq || !rq.awaitingPick || rq.buyerId !== playerId) return;
+    if (this.alive.has(targetId) || !this.roster.some((p) => p.id === targetId)) return;
+    this._applyRevive(targetId);
+  }
+
+  _applyRevive(targetId) {
+    this.reviveQ = null;
+    this.livesMap[targetId] = COOP_REVIVE_LIVES;
+    this.alive.add(targetId);
+    this.emit('revive-done', { targetId, livesMap: { ...this.livesMap } });
+    this._after(1800, () => this._coopNextQuestion());
   }
 
   hostNextRound() {
@@ -803,6 +980,18 @@ export class Game {
       return;
     }
 
+    // Revive questions: only the buyer answers.
+    if (this.currentQ.revive) {
+      if (this.currentQ.buyerId !== this.me.id) return;
+      if (this.phase !== 'answering' || this.myAnswered) return;
+      this.myAnswered = true;
+      const payload = { qKey: this.currentQ.qKey, idx };
+      this.ui('me-submitted', { idx });
+      if (this.isHost) this._hostOnReviveAnswer(this.me.id, payload);
+      else this.t.send('revive-answer', payload);
+      return;
+    }
+
     if (this.phase !== 'answering' || this.myAnswered || this.myLockedOut) return;
     if (performance.now() < this.frozenUntil) return;
     this.myAnswered = true;
@@ -837,14 +1026,24 @@ export class Game {
   buy(type) {
     if (this.eliminated.has(this.me.id)) return;
     if (this.phase !== 'answering') return;
+    if (!this.currentQ || this.currentQ.duel || this.currentQ.revive) return;
     if (this.myAnswered || this.myLockedOut) return;
     if (performance.now() < this.frozenUntil) return;
     if (this.usedPowerupsThisQ.has(type)) return;
+    if (!MODE_POWERUPS[this.settings.mode].includes(type)) return;
     const def = POWERUPS[type];
-    if (!def || (this.scores[this.me.id] || 0) < def.cost) return;
+    const wallet = this.settings.mode === 'coop' ? this.teamScore : (this.scores[this.me.id] || 0);
+    if (!def || wallet < def.cost) return;
     const payload = { qKey: this.currentQ.qKey, type };
     if (this.isHost) this._hostOnBuy(this.me.id, payload);
     else this.t.send('buy', payload);
+  }
+
+  // Co-op: the revive buyer picks who returns.
+  pickRevive(targetId) {
+    const payload = { targetId };
+    if (this.isHost) this._hostOnRevivePick(this.me.id, payload);
+    else this.t.send('revive-pick', payload);
   }
 
   voteRematch() {
@@ -883,6 +1082,8 @@ export class Game {
         this.scores = { ...data.scores };
         this.myDouble = false;
         this.pot = 0;
+        this.teamScore = data.teamScore || 0;
+        this.livesMap = { ...(data.livesMap || {}) };
         this.eliminated = new Set();
         this.ghostShotQKey = null;
         this.phase = 'countdown';
@@ -901,6 +1102,8 @@ export class Game {
       case 'question': {
         this.currentQ = data;
         if (data.pot !== undefined) this.pot = data.pot;
+        if (data.teamScore !== undefined) this.teamScore = data.teamScore;
+        if (data.livesMap) this.livesMap = { ...data.livesMap };
         this.phase = 'countdown';
         this.myAnswered = false;
         this.myLockedOut = false;
@@ -937,6 +1140,13 @@ export class Game {
 
       case 'verdict': {
         this.scores = { ...data.scores };
+        if (data.livesMap) {
+          this.livesMap = { ...data.livesMap };
+          // Co-op: a heartless player is out (until revived).
+          for (const [id, n] of Object.entries(this.livesMap)) {
+            if (n === 0) this.eliminated.add(id);
+          }
+        }
         if (data.playerId === this.me.id) {
           this.myLockedOut = true;
         }
@@ -946,6 +1156,7 @@ export class Game {
 
       case 'powerup-applied': {
         this.scores = { ...data.scores };
+        if (data.teamScore !== undefined) this.teamScore = data.teamScore;
         if (data.playerId === this.me.id) {
           this.usedPowerupsThisQ.add(data.type);
           if (data.type === 'double') this.myDouble = true;
@@ -962,6 +1173,8 @@ export class Game {
         this.scores = { ...data.scores };
         this.phase = 'reveal';
         if (data.pot !== undefined) this.pot = data.pot;
+        if (data.teamScore !== undefined) this.teamScore = data.teamScore;
+        if (data.livesMap) this.livesMap = { ...data.livesMap };
         for (const id of data.ghostRevived || []) this.eliminated.delete(id);
         for (const id of data.eliminated || []) this.eliminated.add(id);
         this.ghostShotQKey = null;
@@ -1027,6 +1240,45 @@ export class Game {
 
       case 'ghost-answer': {
         if (this.isHost && from !== this.me.id) this._hostOnGhostAnswer(from, data);
+        return;
+      }
+
+      case 'revive-q': {
+        this.currentQ = { qKey: data.qKey, q: data.q, revive: true, buyerId: data.buyerId };
+        this.phase = 'countdown';
+        this.myAnswered = false;
+        this.myLockedOut = false;
+        this.ui('revive-q', data);
+        setTimeout(() => {
+          if (!this.currentQ || this.currentQ.qKey !== data.qKey) return;
+          this.phase = 'answering';
+          this.goAt = performance.now();
+          this.ui('revive-unlocked', { qKey: data.qKey, buyerId: data.buyerId });
+        }, 1100);
+        return;
+      }
+
+      case 'revive-answer': {
+        if (this.isHost && from !== this.me.id) this._hostOnReviveAnswer(from, data);
+        return;
+      }
+
+      case 'revive-result': {
+        if (data.teamScore !== undefined) this.teamScore = data.teamScore;
+        this.phase = 'reveal';
+        this.ui('revive-result', data);
+        return;
+      }
+
+      case 'revive-pick': {
+        if (this.isHost && from !== this.me.id) this._hostOnRevivePick(from, data);
+        return;
+      }
+
+      case 'revive-done': {
+        this.livesMap = { ...data.livesMap };
+        this.eliminated.delete(data.targetId);
+        this.ui('revive-done', data);
         return;
       }
 

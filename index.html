@@ -75,6 +75,7 @@
           <div class="setting-options" data-setting="mode">
             <button class="chip selected" data-value="classic">CLASSIC</button>
             <button class="chip" data-value="royale">ROYALE&nbsp;∞</button>
+            <button class="chip" data-value="coop">CO-OP&nbsp;🤝</button>
           </div>
         </div>
         <div class="setting-group" data-group="difficulty">
@@ -102,6 +103,15 @@
             <button class="chip" data-value="easy">EASY</button>
             <button class="chip selected" data-value="medium">MEDIUM</button>
             <button class="chip" data-value="hard">HARD</button>
+          </div>
+        </div>
+        <div class="setting-group" data-group="goal" hidden>
+          <span class="setting-label">GOAL ⭐</span>
+          <div class="setting-options" data-setting="goal">
+            <button class="chip" data-value="1000">1K</button>
+            <button class="chip selected" data-value="5000">5K</button>
+            <button class="chip" data-value="10000">10K</button>
+            <button class="chip" data-value="0">ENDLESS</button>
           </div>
         </div>
         <div class="setting-group" data-group="ante" hidden>
@@ -240,6 +250,13 @@
       </div>
     </dialog>
 
+    <dialog id="revive-modal" class="modal duel-modal">
+      <h3 class="help-heading">💚 WHO RETURNS?</h3>
+      <p class="duel-sub">You earned it — pick the teammate who comes back with 2 lives.</p>
+      <div id="revive-targets" class="duel-targets"></div>
+      <button id="btn-revive-pick" class="btn btn-pink">RESURRECT!</button>
+    </dialog>
+
     <dialog id="help-modal" class="modal help-modal">
       <h3 class="help-heading">HOW TO PLAY</h3>
       <ul class="help-list">
@@ -249,6 +266,7 @@
         <li>👑 <b>ROYALE mode is endless:</b> everyone starts with 1000 points and antes into a pot each question (25, 50 or 100 — the host sets the pace) — the question winner takes the pot (it rolls over if nobody's right). Hit 0 and you're out, spectating. Last one standing wins. The ramp dial goes 1 (one fixed difficulty) to 5 (total chaos).</li>
         <li>👻 <b>Ghost shot (Royale):</b> if every survivor gets a question wrong, the fallen get one chance to answer it — nail it and you RISE AGAIN with 100 points.</li>
         <li>⚔️ <b>Duel (Royale):</b> challenge a foe and stake 0-200. You alternate solo untimed questions; the first miss loses and pays the stake. Can't cover it? You bust out.</li>
+        <li>🤝 <b>CO-OP mode:</b> 2-4 players, one shared team score, racing to a goal (1K/5K/10K or endless). Everyone has 3 lives — a miss costs YOU a heart, never the team. All hearts gone = team squashed. Power-ups (50/50, Double Down, and 💚 REVIVE — answer one untimed question to bring a fallen teammate back with 2 lives) spend from the team score.</li>
         <li>🧍 <b>SOLO RUN:</b> just you, 3 lives, no timer, endless ramping questions. A miss costs a heart; how far can you get?</li>
         <li>🛒 <b>Spend points on power-ups mid-question:</b></li>
       </ul>
