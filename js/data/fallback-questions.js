@@ -129,4 +129,5 @@ export const FALLBACK_BANK = [
   { difficulty: 'hard', category: 'Geography', text: 'Which African river flows through Victoria Falls?', correct: 'The Zambezi', incorrect: ['The Congo', 'The Niger', 'The Limpopo'] },
   { difficulty: 'hard', category: 'Music', text: 'How many keys does a standard concert harp have pedals for?', correct: 'Seven', incorrect: ['Five', 'Eight', 'Twelve'] },
   { difficulty: 'hard', category: 'Movies', text: 'Which 1927 film was the first feature-length "talkie"?', correct: 'The Jazz Singer', incorrect: ['Metropolis', 'Sunrise', 'Wings'] },
+  { difficulty: 'medium', category: 'Sports', text: 'How many rings are on the Olympic flag?', correct: 'Five', incorrect: ['Four', 'Six', 'Seven'] },
 ];
