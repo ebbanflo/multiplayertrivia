@@ -98,4 +98,16 @@ export const FALLBACK_BANK = [
   { difficulty: 'hard', category: 'Literature', text: 'What is the opening line of "Moby-Dick"?', correct: '"Call me Ishmael."', incorrect: ['"It was the best of times."', '"In the beginning..."', '"I am an invisible man."'] },
   { difficulty: 'hard', category: 'Science', text: 'What is the SI unit of electrical capacitance?', correct: 'Farad', incorrect: ['Henry', 'Ohm', 'Tesla'] },
   { difficulty: 'hard', category: 'Sports', text: 'A perfect game in ten-pin bowling scores how many points?', correct: '300', incorrect: ['250', '280', '360'] },
+
+  // ------------------ extras (mixed) ------------------
+  { difficulty: 'easy', category: 'Geography', text: 'Which country is shaped like a boot?', correct: 'Italy', incorrect: ['Spain', 'Portugal', 'Greece'] },
+  { difficulty: 'easy', category: 'Animals', text: 'What is the tallest animal in the world?', correct: 'Giraffe', incorrect: ['Elephant', 'Ostrich', 'Camel'] },
+  { difficulty: 'easy', category: 'Science', text: 'How many colors are in a rainbow?', correct: 'Seven', incorrect: ['Five', 'Six', 'Eight'] },
+  { difficulty: 'easy', category: 'Movies', text: 'What kind of animal is Simba in "The Lion King"?', correct: 'Lion', incorrect: ['Tiger', 'Leopard', 'Cheetah'] },
+  { difficulty: 'medium', category: 'History', text: 'Which ship sank on its maiden voyage in 1912?', correct: 'The Titanic', incorrect: ['The Lusitania', 'The Britannic', 'The Olympic'] },
+  { difficulty: 'medium', category: 'Science', text: 'What planet has the most moons known as of the 2020s?', correct: 'Saturn', incorrect: ['Jupiter', 'Uranus', 'Neptune'] },
+  { difficulty: 'medium', category: 'Geography', text: 'Which U.S. state is the Grand Canyon in?', correct: 'Arizona', incorrect: ['Nevada', 'Utah', 'Colorado'] },
+  { difficulty: 'hard', category: 'Science', text: 'What is the most abundant element in the universe?', correct: 'Hydrogen', incorrect: ['Helium', 'Oxygen', 'Carbon'] },
+  { difficulty: 'hard', category: 'History', text: 'In which city was Archduke Franz Ferdinand assassinated in 1914?', correct: 'Sarajevo', incorrect: ['Vienna', 'Belgrade', 'Budapest'] },
+  { difficulty: 'hard', category: 'Literature', text: 'Which Russian author wrote "Crime and Punishment"?', correct: 'Fyodor Dostoevsky', incorrect: ['Leo Tolstoy', 'Anton Chekhov', 'Ivan Turgenev'] },
 ];
