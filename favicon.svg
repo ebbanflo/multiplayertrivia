@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect x="8" y="8" width="496" height="496" rx="104" fill="#2fc7b5" stroke="#2b1b44" stroke-width="16"/>
+  
+    <circle cx="120" cy="132" r="26" fill="#ffd93d" stroke="#2b1b44" stroke-width="8.84"/>
+    <circle cx="398" cy="150" r="20" fill="#ff4fa3" stroke="#2b1b44" stroke-width="6.800000000000001"/>
+    <circle cx="128" cy="392" r="18" fill="#7b5be6" stroke="#2b1b44" stroke-width="6.12"/>
+    <circle cx="392" cy="388" r="24" fill="#7fe348" stroke="#2b1b44" stroke-width="8.16"/>
+  
+    <text x="269.5" y="278.5" font-family="'DejaVu Sans','Liberation Sans',sans-serif" font-weight="900" font-size="300" text-anchor="middle" dominant-baseline="middle" fill="#2b1b44">?</text>
+    <text x="256" y="262" font-family="'DejaVu Sans','Liberation Sans',sans-serif" font-weight="900" font-size="300" text-anchor="middle" dominant-baseline="middle" fill="#fff6e8"
+          stroke="#2b1b44" stroke-width="18" stroke-linejoin="round"
+          paint-order="stroke" style="paint-order:stroke">?</text>
+</svg>
